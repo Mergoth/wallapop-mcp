@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, Mutex, Weak},
     time::{Duration, Instant, SystemTime},
 };
+use ureq::tls::{TlsConfig, TlsProvider};
 
 pub const MAX_BODY: usize = 4 << 20;
 const MAX_CACHE: usize = 8 << 20;
@@ -42,10 +43,18 @@ pub struct Request<'a> {
 }
 impl Transport {
     pub fn new(interval: Duration) -> Self {
+        let tls = || {
+            TlsConfig::builder()
+                .provider(TlsProvider::NativeTls)
+                .build()
+        };
         let config = || {
             ureq::Agent::config_builder()
                 .http_status_as_error(false)
                 .max_redirects(0)
+                .timeout_connect(Some(Duration::from_secs(10)))
+                .timeout_per_read(Some(Duration::from_secs(30)))
+                .tls_config(tls())
         };
         Self {
             agent: config().build().into(),
