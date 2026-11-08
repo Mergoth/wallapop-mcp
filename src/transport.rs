@@ -152,11 +152,6 @@ impl Transport {
             for (k, v) in r.headers {
                 req = req.header(k, v);
             }
-            // A fresh connection and no automatic redirects prevent replay of
-            // mutations, including PubNub's write-shaped GET endpoint.
-            if !r.read {
-                req = req.header("Connection", "close");
-            }
             let req = req
                 .body(r.body)
                 .map_err(|_| Error::new("invalid_request"))?;
