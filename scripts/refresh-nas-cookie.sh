@@ -35,4 +35,4 @@ echo "NAS session updated at ${NAS_HOST}:${NAS_SESSION}"
 # Restart container so it picks up the new session immediately
 ssh -p "$NAS_PORT" "${NAS_USER}@${NAS_HOST}" \
   "cd ~/wallapop-mcp && /usr/local/bin/docker compose restart"
-echo "Container restarted. MCP is live at http://${NAS_HOST}:8080/sse"
+echo "Container restarted. MCP is live at https://wallapop.mergoth.synology.me/mcp"

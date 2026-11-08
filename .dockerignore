@@ -1,0 +1,8 @@
+.git
+target
+data
+state
+.env
+gateway/.venv
+gateway/tests
+**/__pycache__

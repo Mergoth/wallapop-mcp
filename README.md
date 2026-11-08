@@ -87,40 +87,68 @@ and [migration](docs/MIGRATION.md).
 
 ## Docker / NAS deployment
 
-Build and run as a persistent HTTP/SSE MCP server (e.g. on a Synology NAS):
+The container runs [`gateway/`](gateway), a small Python service that serves MCP over
+Streamable HTTP at `/mcp` and forwards every tool call to one long-lived `wallapop-mcp`
+stdio process. The gateway is its own OAuth 2.1 authorization server with exactly one
+owner: claude.ai (web, Desktop, mobile) registers itself, and you approve it by signing
+in with Google. Only the Google account in `MCP_OWNER_EMAIL`, with a verified email, gets
+a token. Everyone else is refused after the Google step.
 
-```sh
-# Generate a token once and store it
-echo "MCP_AUTH_TOKEN=$(openssl rand -hex 24)" >> .env
+Public endpoint: `https://wallapop.mergoth.synology.me/mcp`
 
-docker compose up -d
+```
+claude.ai → router :443 → DSM reverse proxy (TLS) → 127.0.0.1:8080 → gateway → wallapop-mcp
 ```
 
-The container exposes MCP over SSE on port 8080, bound to `127.0.0.1` (loopback
-only). `supergateway` enforces the `MCP_AUTH_TOKEN` bearer token on every request.
-Mount a `data/` directory beside `docker-compose.yml` and place `session.json`
-inside it. `WALLAPOP_SESSION_PATH` is pre-set to `/data/session.json`.
+**One-time setup**
 
-**Security note:** Do not change the port binding to `0.0.0.0` and do not
-port-forward port 8080 on your router. Access from remote machines via SSH tunnel only.
+1. Google Cloud Console → APIs & Services → Credentials → Create OAuth client ID →
+   *Web application*. Authorized redirect URI:
+   `https://wallapop.mergoth.synology.me/oauth/google/callback`. The OAuth consent screen
+   can stay in *Testing* with your account as the only test user.
+2. DSM → Control Panel → Login Portal → Advanced → Reverse Proxy → Create: source
+   `HTTPS wallapop.mergoth.synology.me:443`, destination `HTTP localhost:8080`. Under
+   Custom Header add *WebSocket*; under Advanced Setting set the proxy read timeout to 86400.
+   The existing `*.mergoth.synology.me` certificate covers it.
+3. Run `./scripts/configure-nas-oauth.sh`: it prompts for the values, writes `.env` on
+   the NAS and starts the container. Or write `.env` beside `docker-compose.yml` (mode 600)
+   by hand:
 
-**Connecting agents** — open the tunnel first, then connect via bearer token:
+   ```sh
+   MCP_RESOURCE_URL=https://wallapop.mergoth.synology.me/mcp
+   GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=...
+   MCP_OWNER_EMAIL=you@gmail.com
+   # Optional: static bearer for Claude Code. Leave empty for OAuth only.
+   MCP_AUTH_TOKEN=
+   ```
+
+4. `mkdir -p data state && chmod 700 state`, put `session.json` in `data/`, then
+   `docker compose up -d --build`.
+
+| Variable | Notes |
+| --- | --- |
+| `MCP_RESOURCE_URL` | The MCP URL exactly as clients enter it, `/mcp` included. claude.ai requires an exact match. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | The Google OAuth web client from step 1. |
+| `MCP_OWNER_EMAIL` | The one Google account allowed in, compared case-insensitively. |
+| `MCP_AUTH_TOKEN` | Optional static bearer. Never expires, so it is the weakest credential; leave empty when unused. |
+| `WALLAPOP_MCP_ARGS` | Extra arguments for the binary, e.g. `--allow-writes`. Writes stay off by default. |
+
+OAuth clients and token digests (never tokens themselves) live in `state/oauth-state.json`.
+Access tokens last 1 hour; refresh tokens last 90 days, rotate on every use, and a replayed
+refresh token revokes its whole chain. To sign every client out, delete that file and restart.
+
+**Security note:** keep the port bound to `127.0.0.1` and never forward 8080 on the router.
+The reverse proxy is the only way in.
+
+**Connecting** — claude.ai: Settings → Connectors → Add custom connector → URL
+`https://wallapop.mergoth.synology.me/mcp`, then *Connect* and sign in with Google. The
+connector then also works in Claude Desktop and the mobile apps. Claude Code can use the
+same OAuth flow, or the static bearer:
 
 ```sh
-./scripts/mcp-tunnel.sh start   # keep running in background
-./scripts/mcp-tunnel.sh status
-./scripts/mcp-tunnel.sh stop
-```
-
-```json
-{
-  "mcpServers": {
-    "wallapop": {
-      "url": "http://localhost:8080/sse",
-      "headers": { "Authorization": "Bearer <your-MCP_AUTH_TOKEN>" }
-    }
-  }
-}
+claude mcp add --transport http wallapop https://wallapop.mergoth.synology.me/mcp \
+  --header "Authorization: Bearer <MCP_AUTH_TOKEN>"
 ```
 
 **Refreshing the session cookie** — Wallapop uses a web-only 2FA login, so
@@ -140,6 +168,7 @@ cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 cargo run --release --locked --example footprint -- target/release/wallapop-mcp
+(cd gateway && uv run pytest -q && uv run ruff check .)
 ```
 
 Tests use synthetic fixtures, local HTTP servers and the real executable's stdio.
@@ -148,7 +177,8 @@ They never contact Wallapop or read a developer's session. See
 [contributing](CONTRIBUTING.md).
 
 Experimental and unofficial: offline tests establish known API contracts, not
-current live account compatibility. No checkout, payments or remote HTTP server.
+current live account compatibility. No checkout or payments. The binary has no HTTP
+server of its own; the optional `gateway/` adds one for remote use.
 The former browser-only helpers are replaced by session/cookie import; see the
 migration guide for compatibility details.
 
