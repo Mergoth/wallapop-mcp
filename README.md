@@ -90,24 +90,38 @@ and [migration](docs/MIGRATION.md).
 Build and run as a persistent HTTP/SSE MCP server (e.g. on a Synology NAS):
 
 ```sh
+# Generate a token once and store it
+echo "MCP_AUTH_TOKEN=$(openssl rand -hex 24)" >> .env
+
 docker compose up -d
 ```
 
-The container exposes the MCP over SSE on port 8080. Connect agents with:
+The container exposes MCP over SSE on port 8080, bound to `127.0.0.1` (loopback
+only), behind an nginx reverse proxy that enforces a static bearer token from
+`MCP_AUTH_TOKEN`. Mount a `data/` directory beside `docker-compose.yml` and place
+`session.json` inside it. `WALLAPOP_SESSION_PATH` is pre-set to `/data/session.json`.
+
+**Security note:** Do not change the port binding to `0.0.0.0` and do not
+port-forward port 8080 on your router. Access from remote machines via SSH tunnel only.
+
+**Connecting agents** — open the tunnel first, then connect via bearer token:
+
+```sh
+./scripts/mcp-tunnel.sh start   # keep running in background
+./scripts/mcp-tunnel.sh status
+./scripts/mcp-tunnel.sh stop
+```
 
 ```json
 {
   "mcpServers": {
     "wallapop": {
-      "url": "http://<host>:8080/sse"
+      "url": "http://localhost:8080/sse",
+      "headers": { "Authorization": "Bearer <your-MCP_AUTH_TOKEN>" }
     }
   }
 }
 ```
-
-Mount a `data/` directory beside `docker-compose.yml` and place `session.json`
-inside it. The environment variable `WALLAPOP_SESSION_PATH` is pre-set to
-`/data/session.json` inside the container.
 
 **Refreshing the session cookie** — Wallapop uses a web-only 2FA login, so
 credentials must be imported from a browser session. When the cookie expires:

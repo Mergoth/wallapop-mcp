@@ -12,7 +12,7 @@ set -euo pipefail
 NAS_HOST="192.168.1.99"
 NAS_PORT="2300"
 NAS_USER="vlad"
-NAS_SESSION="/root/wallapop-mcp/data/session.json"
+NAS_SESSION='~/wallapop-mcp/data/session.json'
 LOCAL_SESSION="${HOME}/.config/wallapop_cli/session.json"
 BINARY="$(dirname "$0")/../target/release/wallapop-mcp"
 
