@@ -12,6 +12,4 @@ COPY --from=builder /build/target/release/wallapop-mcp /usr/local/bin/wallapop-m
 ENV WALLAPOP_SESSION_PATH=/data/session.json
 VOLUME /data
 EXPOSE 8080
-# MCP_AUTH_TOKEN is required — container refuses to start without it
-ENV MCP_AUTH_TOKEN=""
-CMD sh -c 'exec supergateway --port 8080 --bearer "$MCP_AUTH_TOKEN" --stdio wallapop-mcp'
+CMD ["supergateway", "--port", "8080", "--stdio", "wallapop-mcp"]
