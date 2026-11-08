@@ -97,9 +97,9 @@ docker compose up -d
 ```
 
 The container exposes MCP over SSE on port 8080, bound to `127.0.0.1` (loopback
-only), behind an nginx reverse proxy that enforces a static bearer token from
-`MCP_AUTH_TOKEN`. Mount a `data/` directory beside `docker-compose.yml` and place
-`session.json` inside it. `WALLAPOP_SESSION_PATH` is pre-set to `/data/session.json`.
+only). `supergateway` enforces the `MCP_AUTH_TOKEN` bearer token on every request.
+Mount a `data/` directory beside `docker-compose.yml` and place `session.json`
+inside it. `WALLAPOP_SESSION_PATH` is pre-set to `/data/session.json`.
 
 **Security note:** Do not change the port binding to `0.0.0.0` and do not
 port-forward port 8080 on your router. Access from remote machines via SSH tunnel only.
