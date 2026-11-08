@@ -85,6 +85,40 @@ and [migration](docs/MIGRATION.md).
 - Automatic contact reuses bounded `contacted.json` history beside an explicit
   session, or `--contacted-file PATH`, recording attempts before sending.
 
+## Docker / NAS deployment
+
+Build and run as a persistent HTTP/SSE MCP server (e.g. on a Synology NAS):
+
+```sh
+docker compose up -d
+```
+
+The container exposes the MCP over SSE on port 8080. Connect agents with:
+
+```json
+{
+  "mcpServers": {
+    "wallapop": {
+      "url": "http://<host>:8080/sse"
+    }
+  }
+}
+```
+
+Mount a `data/` directory beside `docker-compose.yml` and place `session.json`
+inside it. The environment variable `WALLAPOP_SESSION_PATH` is pre-set to
+`/data/session.json` inside the container.
+
+**Refreshing the session cookie** — Wallapop uses a web-only 2FA login, so
+credentials must be imported from a browser session. When the cookie expires:
+
+1. Go to `es.wallapop.com` in Chrome (logged in), open DevTools Console, run
+   `copy(document.cookie)`
+2. Run `./scripts/refresh-nas-cookie.sh` and paste when prompted
+
+The script updates the local session, pushes it to the NAS, and restarts the
+container in one step.
+
 ## Development
 
 ```sh
