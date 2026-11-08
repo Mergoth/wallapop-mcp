@@ -244,7 +244,7 @@ fn build_definitions() -> Vec<Tool> {
     p["photo_paths"] = json!({"type":"array","minItems":1,"maxItems":10,"items":string(4096)});
     add(
         "publish_item",
-        "Publish with 1–10 JPEG photos. Partial results retain the created item ID; never recreate a partial listing.",
+        "Publish with 1–10 JPEG photos (local paths or http/https URLs). Partial results retain the created item ID; never recreate a partial listing.",
         true,
         p,
         &[

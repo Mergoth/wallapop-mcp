@@ -1,7 +1,32 @@
 use super::{Call, Client, models::attribute, read_file};
 use crate::{Context, Error, Result, first, identifier, money, text, uuid};
+use crate::transport::MAX_BODY;
 use serde_json::{Value, json};
 use std::path::Path;
+
+fn fetch_photo(path: &str) -> crate::Result<Vec<u8>> {
+    if path.starts_with("http://") || path.starts_with("https://") {
+        use std::io::Read as _;
+        let mut resp = ureq::get(path)
+            .call()
+            .map_err(|_| Error::new("photo_fetch_failed"))?;
+        if resp.status() != 200 {
+            return Err(Error::new("photo_fetch_failed"));
+        }
+        let mut buf = Vec::new();
+        resp.body_mut()
+            .as_reader()
+            .take(MAX_BODY as u64 + 1)
+            .read_to_end(&mut buf)
+            .map_err(|_| Error::new("photo_fetch_failed"))?;
+        if buf.len() > MAX_BODY {
+            return Err(Error::new("photo_too_large"));
+        }
+        Ok(buf)
+    } else {
+        read_file(Path::new(path), 8 << 20)
+    }
+}
 
 impl Client {
     pub(super) fn publish(&self, ctx: &Context, a: &Value) -> Result<Value> {
@@ -23,7 +48,7 @@ impl Client {
             .as_array()
             .ok_or(Error::new("photos_required"))?
         {
-            let b = read_file(Path::new(path.as_str().unwrap_or("")), 8 << 20)?;
+            let b = fetch_photo(path.as_str().unwrap_or(""))?;
             if !b.starts_with(&[255, 216, 255]) || b.len() < 4 {
                 return Err(Error::new("jpeg_required"));
             }
