@@ -6,6 +6,7 @@ use super::{
     search::Nonempty,
 };
 use crate::{Context, Error, Result, identifier, pick, text};
+use crate::transport::query;
 use serde_json::{Value, json};
 
 impl Client {
@@ -166,7 +167,52 @@ impl Client {
                 }
                 Ok(json!({"price":v["item"]["price"]["amount"],"restriction":v["restriction"]}))
             }
+            "list_favorites" => {
+                let pages = a["pages"].as_u64().unwrap_or(1).min(5) as usize;
+                let mut items: Vec<Value> = Vec::new();
+                let mut since = String::new();
+                for _ in 0..pages {
+                    let path = if since.is_empty() {
+                        "/favorite-lists".into()
+                    } else {
+                        query("/favorite-lists", &[("since".into(), since.clone())])
+                    };
+                    let v = self.get(ctx, &path, true, fresh)?;
+                    let raw = v["data"].as_array().ok_or(Error::new("invalid_response"))?;
+                    for item in raw {
+                        if let Ok(n) = normalize(item, &self.web, true) {
+                            items.push(n);
+                        }
+                    }
+                    let next = text(&v["meta"]["next"]);
+                    if next.is_empty() {
+                        break;
+                    }
+                    since = next;
+                }
+                Ok(json!({"count": items.len(), "items": items}))
+            }
+            "saved_search_hits" => {
+                let v = self.get(
+                    ctx,
+                    "/searchalerts/savedsearch/alerts/total-hits",
+                    true,
+                    fresh,
+                )?;
+                Ok(json!({"hits": v["hits"].as_u64().unwrap_or(0)}))
+            }
+            "check_saved_search" => {
+                let params = self.alert_params(ctx, a)?;
+                let path = query("/searchalerts/savedsearch/exists", &params);
+                let (status, location) = self.authed_with_location(ctx, "HEAD", &path)?;
+                let id = location.as_deref().and_then(id_from_location).map(str::to_owned);
+                Ok(json!({"saved": status == 200, "id": id}))
+            }
             _ => Err(Error::new("unknown_tool")),
         }
     }
+}
+
+fn id_from_location(loc: &str) -> Option<&str> {
+    loc.trim_end_matches('/').rsplit('/').next().filter(|s| !s.is_empty())
 }

@@ -209,6 +209,70 @@ impl Client {
         Err(Error::new("authentication_required"))
     }
 
+    /// Makes an authenticated request and returns (HTTP status, Location header value).
+    /// Used for endpoints that communicate their result via Location rather than body:
+    /// save_search (POST → 201 + Location) and check_saved_search (HEAD → 200/404).
+    pub(crate) fn authed_with_location(
+        &self,
+        ctx: &Context,
+        method: &'static str,
+        path: &str,
+    ) -> Result<(u16, Option<String>)> {
+        for attempt in 0..2 {
+            let (access, device) = {
+                let s = self.session.lock().unwrap();
+                (
+                    s.access.clone(),
+                    text(&first(&s.data["cookies"], &["device_id"])),
+                )
+            };
+            if access.is_empty() && attempt == 0 {
+                self.refresh(ctx, "")?;
+                continue;
+            }
+            let url = format!(
+                "{}/api/v3{}",
+                self.api,
+                path
+            );
+            let mut headers: Vec<(String, String)> = vec![
+                ("Accept".into(), "application/json, text/plain, */*".into()),
+                ("Origin".into(), self.web.clone()),
+                ("Referer".into(), format!("{}/", self.web)),
+                ("X-DeviceOS".into(), "0".into()),
+                ("X-Product".into(), "wallapop".into()),
+                ("X-AppVersion".into(), "826560".into()),
+                ("Accept-Language".into(), "es-ES,es;q=0.9,en;q=0.8".into()),
+            ];
+            if !access.is_empty() {
+                headers.push(("Authorization".into(), format!("Bearer {access}")));
+            }
+            if !device.is_empty() {
+                headers.push(("X-DeviceID".into(), device));
+            }
+            let result = self.transport.request(
+                ctx,
+                Request {
+                    method,
+                    url: &url,
+                    headers: &headers,
+                    body: &[],
+                    read: false,
+                    ttl: std::time::Duration::ZERO,
+                },
+            );
+            match result {
+                Err(e) if e.status == Some(401) && attempt == 0 => {
+                    self.refresh(ctx, &access)?;
+                }
+                Err(e) if e.status == Some(404) => return Ok((404, None)),
+                Err(e) => return Err(e),
+                Ok(r) => return Ok((r.status, r.location)),
+            }
+        }
+        Err(Error::new("authentication_required"))
+    }
+
     fn with_query(&self, path: &str, params: &[(&str, String)]) -> String {
         query(
             path,

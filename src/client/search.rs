@@ -198,6 +198,65 @@ impl Client {
     }
 }
 
+impl Client {
+    /// Build query params for a saved-search alert (same shape the web POSTs to searchalerts).
+    pub(super) fn alert_params(
+        &self,
+        ctx: &Context,
+        a: &Value,
+    ) -> Result<Vec<(String, String)>> {
+        let fresh = a["fresh"] == true;
+        if let (Some(lo), Some(hi)) = (a["min_price"].as_str(), a["max_price"].as_str()) {
+            if cents(lo)? > cents(hi)? {
+                return Err(Error::new("invalid_price_range"));
+            }
+        }
+        let mut q: Vec<(String, String)> = vec![
+            ("keywords".into(), text(&a["keywords"])),
+            ("source".into(), "search_box".into()),
+            ("filters_source".into(), "search_box".into()),
+            (
+                "order_by".into(),
+                text(&a["order_by"]).nonempty("most_relevance"),
+            ),
+        ];
+        if a.get("category_id").is_some() || a.get("subcategory_ids").is_some() {
+            let cats = self.read(ctx, "list_categories", &json!({"fresh":fresh}))?;
+            let leaf = first(a, &["category_id", "subcategory_ids"]);
+            let root = cats["categories"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| contains_category(v, &leaf))
+                .ok_or(Error::new("category_not_found"))?;
+            q.push(("category_id".into(), text(&root["id"])));
+            if let Some(sub) = a.get("subcategory_ids") {
+                if !contains_category(root, sub) {
+                    return Err(Error::new("subcategory_not_in_category"));
+                }
+                q.push(("subcategory_ids".into(), text(sub)));
+            }
+        }
+        for (arg, key) in [
+            ("condition", "condition"),
+            ("min_price", "min_sale_price"),
+            ("max_price", "max_sale_price"),
+        ] {
+            if let Some(v) = a.get(arg) {
+                q.push((key.into(), text(v)));
+            }
+        }
+        if a["shippable"] == true {
+            q.push(("is_shippable".into(), "true".into()));
+        }
+        if let (Some(lat), Some(lon)) = (a.get("latitude"), a.get("longitude")) {
+            q.push(("latitude".into(), text(lat)));
+            q.push(("longitude".into(), text(lon)));
+        }
+        Ok(q)
+    }
+}
+
 pub(super) trait Nonempty {
     fn nonempty(self, default: &str) -> String;
 }

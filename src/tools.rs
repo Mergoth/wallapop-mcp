@@ -154,6 +154,39 @@ fn build_definitions() -> Vec<Tool> {
         );
     }
     add(
+        "list_favorites",
+        "List the signed-in account's favorited listings, up to 5 pages.",
+        false,
+        json!({"pages": integer(1, 5)}),
+        &[],
+    );
+    add(
+        "saved_search_hits",
+        "Total new listings across all saved searches (the badge counter).",
+        false,
+        json!({}),
+        &[],
+    );
+    // saved_search_params reused for check_saved_search and save_search
+    let alert_props = json!({
+        "keywords": string(250),
+        "order_by": enumeration(&[
+            "most_relevance", "newest", "price_low_to_high", "price_high_to_low", "closest"
+        ]),
+        "category_id": integer(1, 10000000), "subcategory_ids": integer(1, 10000000),
+        "condition": string(100), "min_price": price(), "max_price": price(),
+        "shippable": boolean(),
+        "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+        "longitude": {"type": "number", "minimum": -180, "maximum": 180}
+    });
+    add(
+        "check_saved_search",
+        "Check whether a search with exactly these filters is already saved; returns its id or null.",
+        false,
+        alert_props.clone(),
+        &["keywords"],
+    );
+    add(
         "get_offer_constraints",
         "Read listing offer limits.",
         false,
@@ -259,6 +292,27 @@ fn build_definitions() -> Vec<Tool> {
         item(),
         &["item_id"],
     );
+    add(
+        "pause_item",
+        "Pause (inactivate) an owned listing: hidden from the marketplace but kept in your catalog. Editing it brings it back online.",
+        true,
+        item(),
+        &["item_id"],
+    );
+    add(
+        "save_search",
+        "Save a search so Wallapop notifies you of new matching listings. Returns the saved search id.",
+        true,
+        alert_props,
+        &["keywords"],
+    );
+    add(
+        "remove_saved_search",
+        "Delete a saved search by id.",
+        true,
+        json!({"search_id": string(128)}),
+        &["search_id"],
+    );
     tools
 }
 impl Tool {
@@ -267,10 +321,12 @@ impl Tool {
             && !matches!(
                 self.name,
                 "set_favorite" | "send_message" | "send_offer" | "publish_item"
+                    | "pause_item" | "save_search"
             );
         let idempotent = matches!(
             self.name,
-            "set_favorite" | "edit_item" | "reserve_item" | "mark_sold" | "delete_item"
+            "set_favorite" | "edit_item" | "reserve_item" | "mark_sold"
+                | "delete_item" | "pause_item" | "remove_saved_search"
         );
         json!({
             "name": self.name, "description": self.description, "inputSchema": self.schema,
