@@ -6,7 +6,7 @@ pub mod transport;
 
 use serde_json::{Value, json};
 use std::{
-    fmt,
+    fmt::{self, Write as FmtWrite},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -167,7 +167,10 @@ pub fn uuid() -> Result<String> {
     getrandom::getrandom(&mut b).map_err(|_| Error::new("random_unavailable"))?;
     b[6] = (b[6] & 15) | 64;
     b[8] = (b[8] & 63) | 128;
-    let h: String = b.iter().map(|b| format!("{b:02x}")).collect();
+    let h = b.iter().fold(String::with_capacity(32), |mut s, b| {
+        write!(s, "{b:02x}").unwrap();
+        s
+    });
     Ok(format!(
         "{}-{}-{}-{}-{}",
         &h[..8],
