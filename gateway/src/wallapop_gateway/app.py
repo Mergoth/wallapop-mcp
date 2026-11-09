@@ -2,16 +2,35 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Callable
 
 import httpx2
 from mcp.server.auth.provider import ProviderTokenVerifier
 from starlette.applications import Starlette
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 from starlette.routing import Route
 
 from wallapop_gateway.config import Settings
 from wallapop_gateway.metadata import build_auth_settings, enable_public_client_metadata
 from wallapop_gateway.oauth import CALLBACK_PATH, LOGIN_PATH, GoogleOwnerOAuthProvider
 from wallapop_gateway.proxy import Upstream, build_server
+
+
+class _McpDiscoveryAlias(BaseHTTPMiddleware):
+    """Alias /mcp/.well-known/* → /.well-known/* for clients that path-append the MCP URL.
+
+    Some clients (including ChatGPT) discover OAuth metadata by appending the MCP resource
+    path to the well-known prefix, e.g. /.well-known/oauth-authorization-server/mcp.
+    The MCP SDK only registers the standard root-level paths; this middleware rewrites the
+    path before routing so both forms work.
+    """
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if request.url.path.startswith("/mcp/.well-known/"):
+            request.scope["path"] = request.url.path[len("/mcp"):]
+        return await call_next(request)
 
 
 def build_app(settings: Settings, *, http_client: httpx2.AsyncClient | None = None) -> Starlette:
@@ -51,4 +70,5 @@ def build_app(settings: Settings, *, http_client: httpx2.AsyncClient | None = No
                 yield
 
     app.router.lifespan_context = lifespan
+    app.add_middleware(_McpDiscoveryAlias)
     return app

@@ -55,7 +55,7 @@ GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
 ACCESS_TTL = 3600
 REFRESH_TTL = 90 * 86400
 CODE_TTL = 300
-LOGIN_TTL = 600
+LOGIN_TTL = 1800  # 30 min — ChatGPT may delay showing the sign-in link to the user
 MAX_CLIENTS = 50
 MAX_PENDING = 100
 TXN_COOKIE = "wallapop_login"
@@ -243,10 +243,10 @@ class GoogleOwnerOAuthProvider(
 
         pending = self._live_pending(txn)
         if pending is None:
-            return _page("This sign-in link has expired. Start again from Claude.", status=400)
+            return _page("This sign-in link has expired. Start the connection again from your AI assistant.", status=400)
         client = self._clients.get(pending.client_id)
         if client is None:
-            return _page("Unknown client. Start again from Claude.", status=400)
+            return _page("Unknown client. Start the connection again from your AI assistant.", status=400)
         assert isinstance(txn, str)
 
         if form is None:
@@ -266,7 +266,7 @@ class GoogleOwnerOAuthProvider(
 
         cookie = request.cookies.get(TXN_COOKIE, "")
         if not hmac.compare_digest(cookie.encode(), txn.encode()):
-            return _page("Open the sign-in link from Claude and click Continue.", status=403)
+            return _page("Please open the sign-in link from your AI assistant and click Continue.", status=403)
 
         pending.google_verifier = secrets.token_urlsafe(48)
         pending.nonce = secrets.token_urlsafe(24)
@@ -291,7 +291,7 @@ class GoogleOwnerOAuthProvider(
         txn = request.query_params.get("state")
         pending = self._live_pending(txn)
         if pending is None or pending.google_verifier is None:
-            return _page("This sign-in link has expired. Start again from Claude.", status=400)
+            return _page("This sign-in link has expired. Start the connection again from your AI assistant.", status=400)
         assert isinstance(txn, str)
         # Single use whatever the outcome: a failed sign-in starts again from Claude.
         del self._pending[txn]
@@ -306,14 +306,14 @@ class GoogleOwnerOAuthProvider(
             email = await self._verified_email(code, pending)
         except (httpx2.HTTPError, ValueError, TypeError, KeyError) as exc:
             log.warning("google sign-in failed: %s", exc)
-            return _page("Google sign-in failed. Start again from Claude.", status=502)
+            return _page("Google sign-in failed. Please try connecting again from your AI assistant.", status=502)
         if email is None or not hmac.compare_digest(email.encode(), self._owner_email.encode()):
             log.warning("google sign-in refused for %s", email)
             return _page("This Google account is not allowed to use this server.", status=403)
 
         client = self._clients.get(pending.client_id)
         if client is None:
-            return _page("Unknown client. Start again from Claude.", status=400)
+            return _page("Unknown client. Start the connection again from your AI assistant.", status=400)
         now = time.time()
         auth_code = secrets.token_urlsafe(32)
         self._codes = {c: a for c, a in self._codes.items() if a.expires_at > now}
@@ -513,7 +513,15 @@ h1{font-size:1.25rem;margin:0 0 .75rem}p{margin:.5rem 0}
 button{width:100%;font:inherit;font-weight:600;padding:.6rem;margin-top:.75rem;border:0;border-radius:8px;background:#1f883d;color:#fff}
 """
 
-_TRUSTED_REDIRECT_HOSTS = ("claude.ai", "claude.com", "localhost", "127.0.0.1")
+_TRUSTED_REDIRECT_HOSTS = (
+    "claude.ai",
+    "claude.com",
+    "chatgpt.com",
+    "chat.openai.com",
+    "openai.com",
+    "localhost",
+    "127.0.0.1",
+)
 
 
 def _page(body: str, *, status: int = 200) -> HTMLResponse:
@@ -536,8 +544,8 @@ def _consent_page(
     warning = (
         ""
         if host in _TRUSTED_REDIRECT_HOSTS
-        else f"<p class=warn>This will not return to Claude. Continue only if you expect "
-        f"{html.escape(host)}.</p>"
+        else f"<p class=warn>This will return to <b>{html.escape(host)}</b>, not a known AI assistant. "
+        f"Continue only if you expect that.</p>"
     )
     return _page(
         f"<h1>Allow access to your Wallapop account?</h1>"
