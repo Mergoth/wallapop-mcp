@@ -8,6 +8,8 @@
 
 set -euo pipefail
 
+export PATH="$HOME/.cargo/bin:$PATH"
+
 NAS_HOST="192.168.1.99"
 NAS_PORT="2300"
 NAS_USER="vlad"
