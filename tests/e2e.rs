@@ -60,7 +60,7 @@ fn publish_and_cleanup(c: &Client, args: serde_json::Value) {
         .unwrap_or_else(|e| panic!("publish_item failed: {e:#?}"));
     let id = v["item_id"].as_str().expect("missing item_id");
     eprintln!("e2e: created {id}, deleting...");
-    c.invoke(&ctx(), "delete_item", &json!({"item_id": id, "yes": true}))
+    c.invoke(&ctx(), "delete_item", &json!({"item_id": id}))
         .unwrap_or_else(|e| panic!("delete_item {id} failed: {e:#?}"));
     eprintln!("e2e: deleted {id} ✓");
 }
