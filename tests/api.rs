@@ -714,9 +714,20 @@ fn edit_rejects_missing_state_before_writing() {
         assert_eq!(s.count(), 1);
     }
 }
+fn small_jpeg() -> Vec<u8> {
+    use image::RgbImage;
+    use image::codecs::jpeg::JpegEncoder;
+    let img = RgbImage::new(2, 2);
+    let mut out = Vec::new();
+    JpegEncoder::new_with_quality(&mut out, 50)
+        .encode(img.as_raw(), 2, 2, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    out
+}
+
 fn publish_args(dir: &Temp, count: usize) -> Value {
     let paths = (0..count)
-        .map(|i| dir.file(&format!("photo{i}.jpg"), [255, 216, 255, 1]))
+        .map(|i| dir.file(&format!("photo{i}.jpg"), small_jpeg()))
         .collect::<Vec<_>>();
     json!({"title":"Camera","description":"Description","price":"19.95","category_leaf_id":"10088","condition":"good","color":"blue","shipping_allowed":false,"photo_paths":paths})
 }

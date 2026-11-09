@@ -1,8 +1,10 @@
 pub mod cli;
 pub mod client;
+pub mod photos;
 pub mod protocol;
 pub mod tools;
 pub mod transport;
+pub mod upload;
 
 use serde_json::{Value, json};
 use std::{

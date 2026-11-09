@@ -126,6 +126,31 @@ impl Client {
                     &Value::Null,
                 )
             }
+            "create_upload_ticket" => {
+                let count = a["count"].as_u64().unwrap_or(1) as usize;
+                let dir = self
+                    .upload_dir
+                    .as_ref()
+                    .ok_or(Error::new("upload_dir_not_configured"))?;
+                let base = self
+                    .public_base_url
+                    .as_ref()
+                    .ok_or(Error::new("public_base_url_not_configured"))?;
+                if self.upload_secret.is_empty() {
+                    return Err(Error::new("upload_secret_not_configured"));
+                }
+                std::fs::create_dir_all(dir)
+                    .map_err(|_| Error::new("upload_dir_create_failed"))?;
+                crate::upload::create_tickets(
+                    count,
+                    &crate::upload::UploadConfig {
+                        upload_dir: dir.clone(),
+                        public_base_url: base.clone(),
+                        secret: self.upload_secret.clone(),
+                        ttl_seconds: self.upload_ttl_seconds,
+                    },
+                )
+            }
             _ => Err(Error::new("unknown_tool")),
         }
     }

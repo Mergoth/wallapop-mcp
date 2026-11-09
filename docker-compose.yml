@@ -18,6 +18,13 @@ services:
       - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
       # Enable write tools (publish, edit, offer, etc.). Safe: the gateway controls access.
       - WALLAPOP_MCP_ARGS=--allow-writes
+      # Photo upload tickets (optional). Set all three to enable create_upload_ticket.
+      - UPLOAD_SECRET=${UPLOAD_SECRET:-}
+      - UPLOAD_DIR=${UPLOAD_DIR:-/data/uploads}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+      - UPLOAD_TTL_SECONDS=${UPLOAD_TTL_SECONDS:-600}
+      # Extra allowlisted hosts for https:// photo URLs (comma-separated, optional).
+      - PHOTO_URL_HOSTS=${PHOTO_URL_HOSTS:-}
     volumes:
       - ./data:/data
       # OAuth clients and token digests.

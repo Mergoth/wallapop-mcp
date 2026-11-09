@@ -97,6 +97,19 @@ pub fn run(args: Vec<String>) -> Result<()> {
         refresh_token: env("WALLAPOP_REFRESH_TOKEN"),
         session: std::env::var_os("WALLAPOP_SESSION_PATH").map(PathBuf::from),
         allow_writes: o.values.remove("allow-writes").is_some(),
+        upload_dir: std::env::var_os("UPLOAD_DIR").map(PathBuf::from),
+        public_base_url: std::env::var("PUBLIC_BASE_URL").ok().filter(|s| !s.is_empty()),
+        upload_secret: std::env::var("UPLOAD_SECRET").unwrap_or_default().into_bytes(),
+        upload_ttl_seconds: std::env::var("UPLOAD_TTL_SECONDS")
+            .ok()
+            .and_then(|s| s.parse().ok()),
+        photo_url_hosts: std::env::var("PHOTO_URL_HOSTS")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect(),
         ..Config::default()
     };
     if let Some(path) = o.values.remove("session") {

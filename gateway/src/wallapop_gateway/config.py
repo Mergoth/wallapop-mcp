@@ -27,6 +27,9 @@ class Settings:
     upstream_command: str
     upstream_args: tuple[str, ...]
     upstream_env: Mapping[str, str]
+    # Upload ticket support (optional — disabled when upload_dir is None).
+    upload_dir: Path | None
+    upload_secret: bytes
 
 
 def _is_loopback(host: str) -> bool:
@@ -75,6 +78,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if "@" not in owner_email:
         raise ConfigError(f"MCP_OWNER_EMAIL={owner_email!r} is not an email address")
 
+    raw_upload_dir = env.get("UPLOAD_DIR", "").strip()
+    upload_dir = Path(raw_upload_dir) if raw_upload_dir else None
+    upload_secret = env.get("UPLOAD_SECRET", "").encode()
+
     return Settings(
         host=host,
         port=port,
@@ -88,5 +95,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         upstream_command=env.get("WALLAPOP_MCP_COMMAND") or "wallapop-mcp",
         upstream_args=tuple(shlex.split(env.get("WALLAPOP_MCP_ARGS", ""))),
         # The SDK spawns the child with a minimal environment; pass its own settings through.
-        upstream_env={k: v for k, v in env.items() if k.startswith("WALLAPOP_")},
+        upstream_env={
+            k: v
+            for k, v in env.items()
+            if k.startswith("WALLAPOP_")
+            or k.startswith("UPLOAD_")
+            or k in ("PUBLIC_BASE_URL", "PHOTO_URL_HOSTS")
+        },
+        upload_dir=upload_dir,
+        upload_secret=upload_secret,
     )
