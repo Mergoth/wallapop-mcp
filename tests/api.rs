@@ -690,7 +690,6 @@ fn edit_rejects_missing_state_before_writing() {
         "shipping",
         "location",
         "title",
-        "brand",
         "condition",
         "price",
         "category_leaf_id",

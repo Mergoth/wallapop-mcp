@@ -81,9 +81,14 @@ impl Client {
             delivery["max_weight_kg"] = a["max_weight_kg"].clone();
             delivery["cost_configuration_id"] = cost.into();
         }
-        let mut attributes = crate::pick(a, &["title", "description", "condition", "color"]);
-        attributes["brand"] = a.get("brand").cloned().unwrap_or(json!(""));
-        attributes["model"] = a.get("model").cloned().unwrap_or(json!(""));
+        let mut attributes = crate::pick(a, &["title", "description", "condition"]);
+        for key in &["color", "brand", "model"] {
+            if let Some(v) = a.get(*key) {
+                if v.as_str().is_some_and(|s| !s.trim().is_empty()) {
+                    attributes[key] = v.clone();
+                }
+            }
+        }
         attributes["price_amount"] = price;
         attributes["suggested_data_banner"] = Value::Null;
         let body = json!({
@@ -196,24 +201,22 @@ fn multipart(photo: &[u8], field: &str, value: &str) -> Result<(Vec<u8>, String)
 
 pub(super) fn edit_body(v: &Value, a: &Value) -> Result<Value> {
     let mut attributes = json!({});
-    for key in [
-        "brand",
-        "model",
-        "color",
-        "title",
-        "description",
-        "condition",
-    ] {
+    for key in ["title", "description", "condition"] {
         let value = a.get(key).cloned().unwrap_or_else(|| attribute(v, key));
         if !value.is_string() {
             return Err(Error::new("current_attribute_unavailable"));
         }
-        if matches!(key, "title" | "description" | "color")
-            && value.as_str().unwrap().trim().is_empty()
-        {
+        if matches!(key, "title" | "description") && value.as_str().unwrap().trim().is_empty() {
             return Err(Error::new("listing_field_required"));
         }
         attributes[key] = value;
+    }
+    // color, brand, model: include only when non-empty (categories may lack these attributes).
+    for key in ["color", "brand", "model"] {
+        let value = a.get(key).cloned().unwrap_or_else(|| attribute(v, key));
+        if value.as_str().is_some_and(|s| !s.trim().is_empty()) {
+            attributes[key] = value;
+        }
     }
     let price = a.get("price").cloned().unwrap_or_else(|| {
         let p = v

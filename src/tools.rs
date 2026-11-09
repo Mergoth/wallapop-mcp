@@ -266,7 +266,6 @@ fn build_definitions() -> Vec<Tool> {
             "price",
             "category_leaf_id",
             "condition",
-            "color",
             "shipping_allowed",
         ],
     );
