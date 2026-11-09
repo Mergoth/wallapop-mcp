@@ -24,6 +24,8 @@ pub struct Error {
     pub status: Option<u16>,
     pub unknown: bool,
     pub partial: Option<Value>,
+    /// Safe fields extracted from an upstream error body (no tokens, trimmed to 2 KB).
+    pub detail: Option<Value>,
 }
 
 impl Error {
@@ -33,6 +35,7 @@ impl Error {
             status: None,
             unknown: false,
             partial: None,
+            detail: None,
         }
     }
     pub fn unknown(mut self) -> Self {
@@ -44,8 +47,12 @@ impl Error {
         self
     }
     pub fn value(&self) -> Value {
-        let mut v =
-            json!({"error":{"code":self.code,"status":self.status,"outcome_unknown":self.unknown}});
+        let mut e =
+            json!({"code":self.code,"status":self.status,"outcome_unknown":self.unknown});
+        if let Some(d) = &self.detail {
+            e["detail"] = d.clone();
+        }
+        let mut v = json!({"error": e});
         if let Some(p) = &self.partial {
             v["partial_result"] = p.clone();
         }
