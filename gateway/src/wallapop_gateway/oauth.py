@@ -60,25 +60,15 @@ MAX_CLIENTS = 50
 MAX_PENDING = 100
 TXN_COOKIE = "wallapop_login"
 
-_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; "
-    "form-action 'self' https://accounts.google.com"
-)
 _SECURITY_HEADERS = {
     "Cache-Control": "no-store",
-    "Content-Security-Policy": _CSP,
+    "Content-Security-Policy": (
+        "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; "
+        "form-action 'none'"
+    ),
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
 }
-
-
-def _redirect_origin(redirect_uri: str) -> str | None:
-    parsed = urlparse(redirect_uri)
-    if parsed.scheme not in ("https", "http") or not parsed.netloc:
-        return None
-    if any(c in parsed.netloc for c in " ;,'\"\t\r\n"):
-        return None
-    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def _digest(token: str) -> str:
@@ -273,7 +263,7 @@ class GoogleOwnerOAuthProvider(
             return _page("Unknown client. Start the connection again from your AI assistant.", status=400)
         assert isinstance(txn, str)
 
-        if form is None:
+        if form is None and request.query_params.get("go") != "1":
             response = _consent_page(txn, client, pending.params)
             # The Google session is ambient, so the click must come from this page: a
             # cross-site POST would not carry a SameSite=Strict cookie.
@@ -541,7 +531,7 @@ body{font:16px/1.5 system-ui,-apple-system,sans-serif;max-width:26rem;margin:10v
 main{background:#fff;border:1px solid #d0d7de;border-radius:12px;padding:1.5rem}
 h1{font-size:1.25rem;margin:0 0 .75rem}p{margin:.5rem 0}
 .meta{color:#57606a;font-size:.9rem}.warn{color:#9a6700}
-button{width:100%;font:inherit;font-weight:600;padding:.6rem;margin-top:.75rem;border:0;border-radius:8px;background:#1f883d;color:#fff}
+.button{display:block;box-sizing:border-box;text-align:center;text-decoration:none;width:100%;font:inherit;font-weight:600;padding:.6rem;margin-top:.75rem;border:0;border-radius:8px;background:#1f883d;color:#fff}
 """
 
 _TRUSTED_REDIRECT_HOSTS = (
@@ -550,23 +540,20 @@ _TRUSTED_REDIRECT_HOSTS = (
     "chatgpt.com",
     "chat.openai.com",
     "openai.com",
-    "localhost",
+    "oauth-redirect.googleusercontent.com",  # Gemini app custom connectors
+    "vertexaisearch.cloud.google.com",  # Gemini Enterprise
+    "localhost",  # Gemini CLI, Claude Code
     "127.0.0.1",
 )
 
 
-def _page(body: str, *, status: int = 200, form_target: str | None = None) -> HTMLResponse:
-    headers = dict(_SECURITY_HEADERS)
-    if form_target:
-        # Browsers apply form-action to every redirect after the consent POST, ending at the
-        # client's redirect_uri; without its origin the final hop is silently blocked.
-        headers["Content-Security-Policy"] = f"{_CSP} {form_target}"
+def _page(body: str, *, status: int = 200) -> HTMLResponse:
     return HTMLResponse(
         f"<!doctype html><meta charset=utf-8>"
         f'<meta name=viewport content="width=device-width,initial-scale=1">'
         f"<title>Wallapop MCP</title><style>{_STYLE}</style><main>{body}</main>",
         status_code=status,
-        headers=headers,
+        headers=_SECURITY_HEADERS,
     )
 
 
@@ -587,8 +574,9 @@ def _consent_page(
         f"<h1>Allow access to your Wallapop account?</h1>"
         f"<p><b>{name}</b> is asking to use your Wallapop account.</p>"
         f"<p class=meta>Returns to <b>{html.escape(host)}</b></p>{warning}"
-        f'<form method=post action="{LOGIN_PATH}">'
-        f'<input type=hidden name=txn value="{html.escape(txn)}">'
-        f"<button type=submit>Continue with Google</button></form>",
-        form_target=_redirect_origin(str(params.redirect_uri)),
+        # A link, not a form: browsers check CSP form-action against every redirect after a
+        # form submit, and the chain ends on the client's own redirectors (e.g. Gemini's
+        # googleusercontent page 302s onward), which no allowlist here can name.
+        f'<a class=button href="{LOGIN_PATH}?{html.escape(urlencode({"txn": txn, "go": "1"}))}">'
+        f"Continue with Google</a>"
     )

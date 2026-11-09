@@ -1,10 +1,11 @@
 """Assemble the Starlette app: SDK auth routes, Google sign-in routes and the proxied /mcp."""
 
+import base64
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Callable
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote, unquote, urlencode
 
 import httpx2
 from mcp.server.auth.provider import ProviderTokenVerifier
@@ -13,6 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from wallapop_gateway.config import Settings
 from wallapop_gateway.metadata import build_auth_settings, enable_public_client_metadata
@@ -39,6 +41,73 @@ class _McpDiscoveryAlias(BaseHTTPMiddleware):
             # ChatGPT requests OIDC discovery; alias it to our OAuth 2.0 metadata.
             request.scope["path"] = "/.well-known/oauth-authorization-server"
         return await call_next(request)
+
+
+def _parse_basic(header: str) -> tuple[str, str] | None:
+    if not header.startswith("Basic "):
+        return None
+    try:
+        decoded = base64.b64decode(header[6:], validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if ":" not in decoded:
+        return None
+    client_id, secret = decoded.split(":", 1)
+    return unquote(client_id), unquote(secret)
+
+
+class _TokenClientAuthCompat:
+    """Accept a client secret at /token in the form or as HTTP Basic, whichever the client sends.
+
+    The SDK only accepts the method a client registered, and requires client_id in the form
+    even for Basic. Clients we pre-register by hand (Gemini app/Enterprise) may use either.
+    """
+
+    def __init__(self, app: ASGIApp, provider: GoogleOwnerOAuthProvider) -> None:
+        self.app = app
+        self._provider = provider
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["path"] != "/token" or scope["method"] != "POST":
+            await self.app(scope, receive, send)
+            return
+        body = b""
+        more = True
+        while more:
+            message = await receive()
+            body += message.get("body", b"")
+            more = message.get("more_body", False)
+
+        headers = list(scope["headers"])
+        form = parse_qs(body.decode("utf-8", "replace"), keep_blank_values=True)
+        auth = next((v.decode("latin-1") for k, v in headers if k == b"authorization"), "")
+        basic = _parse_basic(auth)
+        client_id = (form.get("client_id") or [""])[0] or (basic[0] if basic else "")
+        client = await self._provider.get_client(client_id) if client_id else None
+        if client is not None:
+            secret = basic[1] if basic else (form.get("client_secret") or [""])[0]
+            form["client_id"] = [client_id]
+            method = client.token_endpoint_auth_method
+            if method == "client_secret_post" and secret:
+                form["client_secret"] = [secret]
+            elif method == "client_secret_basic" and secret and basic is None:
+                creds = f"{quote(client_id, safe='')}:{quote(secret, safe='')}"
+                headers.append((b"authorization", b"Basic " + base64.b64encode(creds.encode())))
+            body = urlencode(form, doseq=True).encode()
+            headers = [(k, v) for k, v in headers if k != b"content-length"]
+            headers.append((b"content-length", str(len(body)).encode()))
+            scope = {**scope, "headers": headers}
+
+        replayed = False
+
+        async def replay() -> Message:
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay, send)
 
 
 class _TokenRequestLog(BaseHTTPMiddleware):
@@ -114,6 +183,7 @@ def build_app(settings: Settings, *, http_client: httpx2.AsyncClient | None = No
                 yield
 
     app.router.lifespan_context = lifespan
+    app.add_middleware(_TokenClientAuthCompat, provider=provider)
     app.add_middleware(_TokenRequestLog, provider=provider)
     app.add_middleware(_McpDiscoveryAlias)
     return app

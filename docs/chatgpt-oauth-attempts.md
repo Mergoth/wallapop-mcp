@@ -29,6 +29,28 @@ Flow (browser): `/authorize` → 302 `/login?txn` (consent page) → click = for
 - OpenAI docs have no "re-verify" step; ChatGPT only exchanges the code at `POST /token`.
 - Deploy pitfall: `deploy-nas.sh` can "succeed" while the image is stale. After each deploy, grep the running container for the new code.
 
+## Gemini
+
+What each client expects, from its docs:
+- **Gemini CLI**: DCR + PKCE, redirect `http://localhost:<random-port>/oauth/callback`; RFC 9207 `iss` required only if the server advertises it (we don't). Should work as is. Config: `{"mcpServers": {"wallapop": {"httpUrl": "https://wallapop.mergoth.synology.me/mcp"}}}`.
+- **Gemini app** (gemini.google.com → Settings → Connectors → + Custom): takes a Client ID + secret. The redirect URI is per user, `https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-<google-user-id>-<host>`; copy it from "Additional settings → Show more". Not documented: whether it attempts DCR, and which token auth method it uses.
+- **Gemini Enterprise**: fixed redirect `https://vertexaisearch.cloud.google.com/oauth-redirect`, admin-entered client ID/secret.
+
+| # | Hypothesis | Change | Result | Verdict |
+|---|------------|--------|--------|---------|
+| G1 | Gemini app/Enterprise need a pre-registered confidential client, and may send the secret as Basic or form | `scripts/register-oauth-client.sh <name> <redirect-uri>`; `/token` accepts the secret either way (SDK alone rejects Basic without form client_id); Google redirect hosts trusted on consent page | The Gemini app **does DCR by itself** (client_name "Google"), so the script isn't needed for it. Same symptom as ChatGPT #7/#8 | Kept; not the blocker |
+
+## After #7 (2026-11-09): same symptom with Gemini app and ChatGPT
+
+| # | Hypothesis | Check | Result | Verdict |
+|---|------------|-------|--------|---------|
+| 8a | Wrong Google account | Server log | `owner signed in` on every attempt; a non-owner gets a 403 page, never "Sign-in complete" | Ruled out |
+| 8b | #7 CSP not live | Live `/login` headers for the Gemini client | `form-action 'self' https://accounts.google.com https://oauth-redirect.googleusercontent.com` | Fix is live |
+| 8c | Chromium still blocks the chain even with the right CSP | Local replica (consent → form POST → "google" → callback → "client" on 3 sites), headless Chromium 1248, `scratchpad/csp-repro` | Old CSP: **blocked** (`form-action` console error). New CSP: **reaches client**. No CSP: reaches client. Link instead of form: reaches client | Server-side chain is correct now |
+| 8d | Client redirect URI forwards on to another host that form-action blocks | `curl` both redirect URIs **without** code/state | Both 200 | **Wrong check**: with `?code=…` the Gemini URI answers 302 (see 8e) |
+| 8e | Find where the chain stops | User DevTools capture | `…/user_bound_custom-mcp-…?code=… 302`, then nothing. The client's redirector forwards onward, and that hop is still in the form-POST redirect chain, so `form-action` blocks it | **Root cause**: no allowlist can name every client's onward hosts |
+| 9 | Stop starting the chain with a form submit | Consent button is a link (`GET /login?txn=…&go=1`, same SameSite=Strict cookie check); CSP `form-action 'none'`; #7's per-client form-action removed | Replica with an onward 302: form + #7 CSP **blocked**, link **reaches the end**. 38 tests pass | **Fixed** (2026-11-09): user confirms one click connects |
+
 ## Untried, if #7 isn't enough
 
 - RFC 9207: add `iss` to every authorization response and advertise `authorization_response_iss_parameter_supported: true`. That changes the redirect URI to `https://chatgpt.com/connector_platform_oauth_redirect`.
