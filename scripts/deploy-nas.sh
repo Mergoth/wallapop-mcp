@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-NAS_HOST="192.168.1.99"
+NAS_HOST="blacknas.local"
 NAS_PORT="2300"
 NAS_USER="vlad"
 DOCKER="/usr/local/bin/docker"

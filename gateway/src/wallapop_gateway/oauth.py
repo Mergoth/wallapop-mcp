@@ -60,15 +60,25 @@ MAX_CLIENTS = 50
 MAX_PENDING = 100
 TXN_COOKIE = "wallapop_login"
 
+_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; "
+    "form-action 'self' https://accounts.google.com"
+)
 _SECURITY_HEADERS = {
     "Cache-Control": "no-store",
-    "Content-Security-Policy": (
-        "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; "
-        "form-action 'self' https://accounts.google.com"
-    ),
+    "Content-Security-Policy": _CSP,
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
 }
+
+
+def _redirect_origin(redirect_uri: str) -> str | None:
+    parsed = urlparse(redirect_uri)
+    if parsed.scheme not in ("https", "http") or not parsed.netloc:
+        return None
+    if any(c in parsed.netloc for c in " ;,'\"\t\r\n"):
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def _digest(token: str) -> str:
@@ -136,6 +146,8 @@ class GoogleOwnerOAuthProvider(
         # Short-lived, in memory only: a restart just means signing in again.
         self._pending: dict[str, _PendingLogin] = {}
         self._codes: dict[str, AuthorizationCode] = {}
+        # Recently completed txns, so a reloaded or resubmitted sign-in page says "done", not "expired".
+        self._completed_logins: dict[str, dict] = {}
 
         # Durable: registered clients and token digests.
         self._clients: dict[str, OAuthClientInformationFull] = {}
@@ -243,6 +255,18 @@ class GoogleOwnerOAuthProvider(
 
         pending = self._live_pending(txn)
         if pending is None:
+            # Check if this txn was recently completed — ChatGPT re-POSTs to verify after callback.
+            now2 = time.time()
+            self._completed_logins = {t: e for t, e in self._completed_logins.items() if e["expires_at"] > now2}
+            if isinstance(txn, str) and txn in self._completed_logins:
+                log.info("login %s for completed txn — 200", request.method)
+                return _page("Sign-in complete. Return to your AI assistant.")
+            if request.method == "POST" and form is not None:
+                log.warning(
+                    "POST /login with no valid txn — form keys: %s; body preview: %.200s",
+                    list(form.keys()),
+                    str(dict(form))[:200],
+                )
             return _page("This sign-in link has expired. Start the connection again from your AI assistant.", status=400)
         client = self._clients.get(pending.client_id)
         if client is None:
@@ -329,13 +353,12 @@ class GoogleOwnerOAuthProvider(
             subject=OWNER,
         )
         log.warning("owner signed in; client=%s", client.client_name or client.client_id)
-        response = RedirectResponse(
-            construct_redirect_uri(
-                str(pending.params.redirect_uri), code=auth_code, state=pending.params.state
-            ),
-            status_code=302,
-            headers={"Cache-Control": "no-store"},
+        redirect_url = construct_redirect_uri(
+            str(pending.params.redirect_uri), code=auth_code, state=pending.params.state
         )
+        log.warning("callback redirect to %s", str(pending.params.redirect_uri))
+        self._completed_logins[txn] = {"expires_at": now + 120}
+        response = RedirectResponse(redirect_url, status_code=302, headers={"Cache-Control": "no-store"})
         response.delete_cookie(TXN_COOKIE, path=LOGIN_PATH)
         return response
 
@@ -379,6 +402,14 @@ class GoogleOwnerOAuthProvider(
         self, client: OAuthClientInformationFull, authorization_code: str
     ) -> AuthorizationCode | None:
         code = self._codes.get(authorization_code)
+        if code is None:
+            log.warning("load_authorization_code: code not found (pool size=%d)", len(self._codes))
+        elif code.client_id != client.client_id:
+            log.warning(
+                "load_authorization_code: client_id mismatch — code has %s, request has %s",
+                code.client_id,
+                client.client_id,
+            )
         return code if code is not None and code.client_id == client.client_id else None
 
     async def exchange_authorization_code(
@@ -524,13 +555,18 @@ _TRUSTED_REDIRECT_HOSTS = (
 )
 
 
-def _page(body: str, *, status: int = 200) -> HTMLResponse:
+def _page(body: str, *, status: int = 200, form_target: str | None = None) -> HTMLResponse:
+    headers = dict(_SECURITY_HEADERS)
+    if form_target:
+        # Browsers apply form-action to every redirect after the consent POST, ending at the
+        # client's redirect_uri; without its origin the final hop is silently blocked.
+        headers["Content-Security-Policy"] = f"{_CSP} {form_target}"
     return HTMLResponse(
         f"<!doctype html><meta charset=utf-8>"
         f'<meta name=viewport content="width=device-width,initial-scale=1">'
         f"<title>Wallapop MCP</title><style>{_STYLE}</style><main>{body}</main>",
         status_code=status,
-        headers=_SECURITY_HEADERS,
+        headers=headers,
     )
 
 
@@ -553,5 +589,6 @@ def _consent_page(
         f"<p class=meta>Returns to <b>{html.escape(host)}</b></p>{warning}"
         f'<form method=post action="{LOGIN_PATH}">'
         f'<input type=hidden name=txn value="{html.escape(txn)}">'
-        f"<button type=submit>Continue with Google</button></form>"
+        f"<button type=submit>Continue with Google</button></form>",
+        form_target=_redirect_origin(str(params.redirect_uri)),
     )

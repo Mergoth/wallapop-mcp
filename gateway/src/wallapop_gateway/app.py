@@ -1,8 +1,10 @@
 """Assemble the Starlette app: SDK auth routes, Google sign-in routes and the proxied /mcp."""
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Callable
+from urllib.parse import parse_qs
 
 import httpx2
 from mcp.server.auth.provider import ProviderTokenVerifier
@@ -17,6 +19,8 @@ from wallapop_gateway.metadata import build_auth_settings, enable_public_client_
 from wallapop_gateway.oauth import CALLBACK_PATH, LOGIN_PATH, GoogleOwnerOAuthProvider
 from wallapop_gateway.proxy import Upstream, build_server
 
+_log = logging.getLogger("wallapop_gateway.token")
+
 
 class _McpDiscoveryAlias(BaseHTTPMiddleware):
     """Alias /mcp/.well-known/* → /.well-known/* for clients that path-append the MCP URL.
@@ -28,9 +32,49 @@ class _McpDiscoveryAlias(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        if request.url.path.startswith("/mcp/.well-known/"):
-            request.scope["path"] = request.url.path[len("/mcp"):]
+        path = request.url.path
+        if path.startswith("/mcp/.well-known/"):
+            request.scope["path"] = path[len("/mcp"):]
+        elif path == "/.well-known/openid-configuration":
+            # ChatGPT requests OIDC discovery; alias it to our OAuth 2.0 metadata.
+            request.scope["path"] = "/.well-known/oauth-authorization-server"
         return await call_next(request)
+
+
+class _TokenRequestLog(BaseHTTPMiddleware):
+    """Log the shape of each /token call and the SDK's error body; never codes or secrets."""
+
+    def __init__(self, app, provider: GoogleOwnerOAuthProvider) -> None:
+        super().__init__(app)
+        self._provider = provider
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if request.url.path != "/token" or request.method != "POST":
+            return await call_next(request)
+        form = parse_qs((await request.body()).decode("utf-8", "replace"))
+        client_id = (form.get("client_id") or [""])[0]
+        known = bool(client_id) and await self._provider.get_client(client_id) is not None
+        auth = request.headers.get("authorization", "")
+        response = await call_next(request)
+        body = b"".join([chunk async for chunk in response.body_iterator])
+        _log.warning(
+            "POST /token grant=%s client_id=%s known=%s form_keys=%s auth_header=%s "
+            "content_type=%s -> %d %s",
+            (form.get("grant_type") or [""])[0],
+            client_id or "<missing>",
+            known,
+            sorted(form),
+            auth.split(" ", 1)[0] if auth else "<none>",
+            request.headers.get("content-type", ""),
+            response.status_code,
+            body[:300].decode("utf-8", "replace") if response.status_code >= 400 else "",
+        )
+        return Response(
+            body,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+        )
 
 
 def build_app(settings: Settings, *, http_client: httpx2.AsyncClient | None = None) -> Starlette:
@@ -70,5 +114,6 @@ def build_app(settings: Settings, *, http_client: httpx2.AsyncClient | None = No
                 yield
 
     app.router.lifespan_context = lifespan
+    app.add_middleware(_TokenRequestLog, provider=provider)
     app.add_middleware(_McpDiscoveryAlias)
     return app

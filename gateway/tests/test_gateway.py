@@ -8,6 +8,7 @@ from starlette.testclient import TestClient
 
 from conftest import (
     BASE,
+    CALLBACK,
     GOOGLE_ID,
     MCP_HEADERS,
     OWNER,
@@ -88,6 +89,18 @@ def test_consent_page_escapes_the_client_name_and_shows_the_redirect_host(
     assert "<script>x</script>" not in page
     assert "&lt;script&gt;" in page
     assert "claude.ai" in page
+
+
+def test_consent_page_csp_allows_the_redirect_chain_back_to_the_client(
+    client: TestClient,
+) -> None:
+    """form-action covers the whole post-submit redirect chain, which ends at the client."""
+    _, challenge = pkce()
+    txn = login_txn(client, register(client), challenge)
+    csp = client.get("/login", params={"txn": txn}).headers["content-security-policy"]
+    form_action = next(d for d in csp.split(";") if d.strip().startswith("form-action"))
+    assert "https://accounts.google.com" in form_action
+    assert f"{urlparse(CALLBACK).scheme}://{urlparse(CALLBACK).netloc}" in form_action
 
 
 def test_consent_click_without_the_page_cookie_is_refused(client: TestClient) -> None:
