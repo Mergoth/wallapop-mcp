@@ -17,9 +17,17 @@ REMOTE_DIR="~/wallapop-mcp"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-echo "==> Running tests before deploy..."
+echo "==> Running unit tests before deploy..."
 cargo test --quiet
-echo "==> Tests passed."
+echo "==> Unit tests passed."
+
+if [ -n "${WALLAPOP_SESSION_PATH:-}" ]; then
+    echo "==> Running e2e tests (WALLAPOP_SESSION_PATH is set)..."
+    cargo test --test e2e --quiet -- --include-ignored
+    echo "==> E2e tests passed."
+else
+    echo "==> Skipping e2e tests (set WALLAPOP_SESSION_PATH to enable)."
+fi
 
 echo "==> Sending source to NAS..."
 tar -C "${REPO_ROOT}" -czf - \
