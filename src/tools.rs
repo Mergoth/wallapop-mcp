@@ -33,13 +33,26 @@ fn item() -> Value {
 fn listing() -> Value {
     json!({
         "title": string(50), "description": string(640), "price": price(),
-        "category_leaf_id": string(20),
+        "category_leaf_id": {
+            "type": "string", "minLength": 1, "maxLength": 20,
+            "description": "Take from a comparable listing: get_item(id).category."
+        },
         "condition": enumeration(&[
             "un_opened", "in_box", "new", "as_good_as_new", "good", "fair", "has_given_it_all"
         ]),
-        "brand": {"type": "string", "maxLength": 100},
-        "model": {"type": "string", "maxLength": 100},
-        "color": string(50), "max_weight_kg": integer(1,30),
+        "brand": {
+            "type": "string", "maxLength": 100,
+            "description": "Optional. Many categories reject it with INVALID_ATTRIBUTE (e.g. 10082 dolls). On INVALID_ATTRIBUTE retry without brand; put it in title instead."
+        },
+        "model": {
+            "type": "string", "maxLength": 100,
+            "description": "Optional. Many categories reject it with INVALID_ATTRIBUTE. On INVALID_ATTRIBUTE retry without it."
+        },
+        "color": {
+            "type": "string", "minLength": 1, "maxLength": 50,
+            "description": "Optional. Many categories reject it with INVALID_ATTRIBUTE. On INVALID_ATTRIBUTE retry without it."
+        },
+        "max_weight_kg": integer(1,30),
         "shipping_allowed": boolean(), "cost_configuration_id": string(128)
     })
 }
@@ -257,7 +270,7 @@ fn build_definitions() -> Vec<Tool> {
     });
     add(
         "publish_item",
-        "Publish with 1–10 photos. Supply photo_paths (server-local JPEG/PNG/WebP files) OR photo_files (https:// URLs from allowlisted hosts, data: URIs, upload: refs, or OpenAI {download_url} objects). Partial results retain the created item ID; never recreate a partial listing.",
+        "Publish with 1–10 photos. Supply photo_paths (server-local JPEG/PNG/WebP files) OR photo_files (https:// URLs from allowlisted hosts, data: URIs, upload: refs, or OpenAI {download_url} objects). Partial results retain the created item ID; never recreate a partial listing. Errors: outcome_unknown:false = nothing created, safe to retry with the same photo_files refs. upload_ticket_not_found = ticket expired or lost; create a new ticket, re-upload, then retry. Call get_item(item_id) for the public listing URL.",
         true,
         p,
         &[
@@ -271,7 +284,7 @@ fn build_definitions() -> Vec<Tool> {
     );
     add(
         "create_upload_ticket",
-        "Create 1–10 one-time upload tickets. Each ticket is a signed URL for a single photo. Pass the returned ref values in photo_files to publish_item. Requires UPLOAD_SECRET and PUBLIC_BASE_URL to be configured.",
+        "Create 1–10 one-time upload tickets. Per photo: PUT raw bytes to upload_url, Content-Type: image/jpeg → 201 {ref, bytes}. Pass the returned ref values in publish_item.photo_files. Single-use, short TTL. Requires UPLOAD_SECRET and PUBLIC_BASE_URL to be configured.",
         true,
         json!({"count": integer(1, 10)}),
         &["count"],
