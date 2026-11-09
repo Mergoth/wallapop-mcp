@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 
 impl Client {
     pub(super) fn publish(&self, ctx: &Context, a: &Value) -> Result<Value> {
-        for key in ["title", "description", "color"] {
+        for key in ["title", "description"] {
             if a[key].as_str().unwrap_or("").trim().is_empty() {
-                return Err(Error::new("listing_field_required"));
+                return Err(Error::new("listing_field_required").field(key));
             }
         }
         numeric_category(&a["category_leaf_id"])?;
@@ -207,7 +207,7 @@ pub(super) fn edit_body(v: &Value, a: &Value) -> Result<Value> {
             return Err(Error::new("current_attribute_unavailable"));
         }
         if matches!(key, "title" | "description") && value.as_str().unwrap().trim().is_empty() {
-            return Err(Error::new("listing_field_required"));
+            return Err(Error::new("listing_field_required").field(key));
         }
         attributes[key] = value;
     }

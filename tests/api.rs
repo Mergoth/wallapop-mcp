@@ -742,6 +742,35 @@ fn publish_validates_all_photos_before_network() {
     assert_eq!(s.count(), 0);
 }
 #[test]
+fn publish_color_is_optional_and_field_named_in_errors() {
+    let dir = Temp::new();
+    // color absent: publish must reach Wallapop, not error server-side.
+    let s = Server::new(|r| match r.path() {
+        "/api/v3/users/me" => Reply::json(
+            200,
+            json!({"location":{"approximated_latitude":40,"approximated_longitude":-3}}),
+        ),
+        "/api/v3/items" => Reply::json(201, json!({"id":ITEM})),
+        _ => Reply::raw(200, ""),
+    });
+    let mut a = publish_args(&dir, 1);
+    a.as_object_mut().unwrap().remove("color");
+    assert!(
+        s.client(true).invoke(&ctx(), "publish_item", &a).is_ok(),
+        "publish_item without color must succeed"
+    );
+    // listing_field_required must name the offending field.
+    let s2 = Server::new(|_| panic!("should not reach upstream"));
+    let mut b = publish_args(&dir, 1);
+    b["title"] = json!("   "); // passes minLength:1 but trim() is empty
+    let err = s2
+        .client(true)
+        .invoke(&ctx(), "publish_item", &b)
+        .unwrap_err();
+    assert_eq!(err.code, "listing_field_required");
+    assert_eq!(err.detail.as_ref().and_then(|d| d["field"].as_str()), Some("title"));
+}
+#[test]
 fn publish_multipart_extra_photos_partial_id_and_exact_cents() {
     let dir = Temp::new();
     let s = Server::new(|r| match r.path() {

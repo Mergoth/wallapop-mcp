@@ -46,6 +46,10 @@ impl Error {
         self.partial = Some(value);
         self
     }
+    pub fn field(mut self, name: &'static str) -> Self {
+        self.detail = Some(json!({"field": name}));
+        self
+    }
     pub fn value(&self) -> Value {
         let mut e =
             json!({"code":self.code,"status":self.status,"outcome_unknown":self.unknown});
