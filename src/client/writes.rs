@@ -3,6 +3,7 @@ use super::{
     publishing::{edit_body, vendor},
 };
 use crate::{Context, Error, Result, identifier, money, text, uuid};
+use crate::transport::query;
 use serde_json::{Value, json};
 
 impl Client {
@@ -99,6 +100,31 @@ impl Client {
                     _ => ("DELETE", "", Value::Null),
                 };
                 self.send(ctx, method, &format!("/items/{id}{suffix}"), &body)
+            }
+            "pause_item" => {
+                let id = self.resolve(ctx, &text(&a["item_id"]), true)?;
+                self.send(ctx, "PUT", &format!("/items/{id}/inactivate"), &Value::Null)
+            }
+            "save_search" => {
+                let params = self.alert_params(ctx, a)?;
+                let path = query("/searchalerts/savedsearch", &params);
+                self.transport.invalidate();
+                let (_, location) = self.authed_with_location(ctx, "POST", &path)?;
+                let id = location
+                    .as_deref()
+                    .and_then(|loc| loc.trim_end_matches('/').rsplit('/').next())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned);
+                Ok(json!({"ok": true, "id": id}))
+            }
+            "remove_saved_search" => {
+                let id = identifier(a["search_id"].as_str().unwrap_or(""))?;
+                self.send(
+                    ctx,
+                    "DELETE",
+                    &format!("/searchalerts/savedsearch/{id}"),
+                    &Value::Null,
+                )
             }
             _ => Err(Error::new("unknown_tool")),
         }

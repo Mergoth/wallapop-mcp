@@ -16,6 +16,8 @@ services:
       - MCP_OWNER_EMAIL=${MCP_OWNER_EMAIL:?Set MCP_OWNER_EMAIL to the one Google account allowed in}
       # Optional static bearer for header-capable clients (Claude Code). Empty = OAuth only.
       - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
+      # Enable write tools (publish, edit, offer, etc.). Safe: the gateway controls access.
+      - WALLAPOP_MCP_ARGS=--allow-writes
     volumes:
       - ./data:/data
       # OAuth clients and token digests.

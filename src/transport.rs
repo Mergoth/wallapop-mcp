@@ -13,6 +13,7 @@ const MAX_CACHE: usize = 8 << 20;
 pub struct Response {
     pub status: u16,
     pub body: Vec<u8>,
+    pub location: Option<String>,
 }
 struct Entry {
     key: String,
@@ -169,6 +170,11 @@ impl Transport {
                             .get("retry-after")
                             .and_then(|v| v.to_str().ok()),
                     );
+                    let location = response
+                        .headers()
+                        .get("location")
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_owned);
                     let mut body = Vec::new();
                     let read_error = response
                         .body_mut()
@@ -193,7 +199,7 @@ impl Transport {
                         return Err(e);
                     }
                     if (200..300).contains(&status) {
-                        return Ok(Response { status, body });
+                        return Ok(Response { status, body, location });
                     }
                     if r.read && attempt < 2 && matches!(status, 429 | 502 | 503 | 504) {
                         ctx.sleep(delay.max(Duration::from_millis(200 << attempt)))?;
