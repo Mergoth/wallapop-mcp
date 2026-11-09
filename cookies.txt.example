@@ -1,18 +1,19 @@
-# cookies.txt — paste the value of a request's "Cookie" header below, then run:
+# cookies.txt — pega aquí el valor del campo "Cookie" de una request y luego:
 #
-#     wallapop login --cookies-file cookies.txt
+#     wallapop-mcp --session ./session.json login --cookies-file ./cookies.txt
 #
-# How to get the value:
-#   1. Open https://es.wallapop.com while logged in and press F12.
-#   2. Go to the Network tab and pick a request to es.wallapop.com or
-#      api.wallapop.com (many show up while the page loads).
-#   3. Click it -> "Headers" tab.
-#   4. Under "Request Headers" find "Cookie:" -> right click -> "Copy value".
-#   5. Paste that value right below the dashed line (the whole
-#      "name=value; name2=value2; ..." line) and save the file.
+# Copia este ejemplo a cookies.txt y sustituye los valores antes de importarlo.
 #
-# Login only keeps what it needs: accessToken,
-# __Secure-next-auth.session-token (the long-lived session), device_id and device_fgp.
-# Never commit this file: it is git-ignored on purpose.
+# Como conseguir el valor (sin copiar cookies a mano):
+#   1. Abre https://es.wallapop.com con tu sesión iniciada y pulsa F12.
+#   2. Ve a la pestaña Red (Network) y busca una petición que apunte a
+#      es.wallapop.com o api.wallapop.com (suelen salir muchas al cargar).
+#   3. Haz clic en esa petición -> pestaña "Cabeceras" (Headers).
+#   4. Busca el apartado "Request Headers" -> campo "Cookie:" -> clic derecho
+#      -> "Copiar valor".
+#   5. Pega ese valor justo debajo de esta línea (toda la línea "name=value;
+#      name2=value2; ..." entre ; ) y guarda el fichero.
+#
+# Las cookies se guardan en el fichero de sesión. No compartas estos ficheros.
 # ----------------------------------------------------------------------------------
-device_id=REPLACE; __Secure-next-auth.session-token=REPLACE; accessToken=REPLACE; device_fgp=REPLACE
+device_id=REEMPLAZA; __Secure-next-auth.session-token=REEMPLAZA; accessToken=REEMPLAZA; device_fgp=REEMPLAZA

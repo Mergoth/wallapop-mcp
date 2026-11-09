@@ -1,185 +1,191 @@
+> Historical upstream endpoint research. Python paths and browser examples below refer to the pre-Rust implementation retained in Git history. Current code and contracts: [architecture](ARCHITECTURE.md), [MCP](MCP.md), [Rust API](API.md).
+
 # Endpoints
 
-Catalogue of every endpoint the library uses, how it was found and which
-client method calls it. **No call needs a browser**: everything is plain HTTP
-through `wallapop_mcp/http.py` (`http_request`), with the session token sent as
-`Authorization: Bearer <access_token>`.
+Catálogo de todos los endpoints que usa la CLI, cómo se extrajeron y a qué
+llamada del código corresponden. **Ninguna llamada necesita navegador**:
+todas son HTTP plano vía `wallapoplib/http.py` (`http_request`), con el token
+de sesión como `Authorization: Bearer <access_token>`.
 
-## Conventions
+## Convenciones
 
-- API base: `https://api.wallapop.com` (`API_BASE = /api/v3`).
-- `BFF` endpoints (the web's Next.js backend) have no `/api/v3`: they live
-  under `/bff/...` at the host root.
-- `Auth` = needs `Authorization: Bearer`. The client also sends `X-DeviceID`
-  when a `device_id` cookie exists, and identifies as the web app with
+- Base de la API: `https://api.wallapop.com` (`API_BASE = /api/v3`).
+- Los endpoints `BFF` (Next.js de la web) no llevan `/api/v3`: viven bajo
+  `/bff/...` directamente en la raíz del host.
+- `Auth` = requiere `Authorization: Bearer`. La CLI añade además
+  `X-DeviceID` si hay cookie `device_id`, y marca la app con
   `Origin: https://es.wallapop.com`, `X-Product: wallapop`,
   `X-AppVersion: 826560`, `X-DeviceOS: 0`.
-- Client helpers (in `wallapop_mcp/client.py`): `_request()` (anonymous) and
-  `_authed()` (auth + automatic web-session refresh on `401`); `_bff()` does
-  the same under the host root without `/api/v3`.
+- Métodos del cliente (en `wallapoplib/client.py`): `_request()` (anónimo) y
+  `_authed()` (con auth + refresh automático de la sesión web si `401`);
+  `_bff()` hace lo mismo pero bajo la raíz sin `/api/v3`.
 
-### App identifiers (constants in `config.py`)
+### Identificadores de app (constantes de `config.py`)
 
-Defined in `wallapop_mcp/config.py`. **They are not secrets**: the web exposes
-them in its JS bundle and every browser uses them, so they can be versioned.
+Definidas en `wallapoplib/config.py`. **No son secretos**: la web las expone en
+su bundle JS y las usa cualquier navegador, por eso se pueden versionar.
 
-- `API_BASE` (`https://api.wallapop.com`) and `API_ROOT` (host root without
-  `/api/v3`, for the Next.js BFF endpoints).
-- `WEB_BASE` (`https://es.wallapop.com`): web origin, sent as `Origin`/`Referer`.
-- `PUB_KEY` (`pub-c-...`) and `SUB_KEY` (`sub-c-...`): the *publish* and
-  *subscribe* keys of Wallapop's PubNub app (its real-time chat). They identify
-  the channel space; they do not authenticate. The open REST publish with the
-  pub key is what makes sending chat messages without a browser possible.
-- `PUB_ORIGIN` (`ps7.pndsn.com`): the PubNub broker messages are published to.
-- `PNSDK` (`PubNub-JS-Web/10.2.6`): the SDK's self-identification string sent
-  with each request.
-- `WEB_APP_VERSION` (`8.2656.0`): the simulated web build; the API uses it to
-  identify the client (`X-AppVersion: 826560`).
+- `API_BASE` (`https://api.wallapop.com`) y `API_ROOT` (raíz sin `/api/v3`,
+  para los endpoints BFF de Next.js).
+- `WEB_BASE` (`https://es.wallapop.com`): origen web; va en `Origin`/`Referer`.
+- `PUB_KEY` (`pub-c-...`) y `SUB_KEY` (`sub-c-...`): llaves de *publicar* y
+  *suscribir* de la app de PubNub de Wallapop (su chat en tiempo real).
+  Identifican el espacio de canales, no autentican. Que el publish REST con la
+  `pub key` sea abierto es lo que permite mandar el mensaje de chat sin
+  navegador.
+- `PUB_ORIGIN` (`ps7.pndsn.com`): el broker de PubNub al que se publica.
+- `PNSDK` (`PubNub-JS-Web/10.2.6`): cadena de auto-identificación del SDK en
+  cada petición.
+- `WEB_APP_VERSION` (`8.2656.0`): la build de la web que se simula; el API la
+  usa para identificar al cliente (`X-AppVersion: 826560`).
 
-What is sensitive (tokens and cookies) never lives in the repository: it is
-stored in `~/.config/wallapop-mcp/{credentials,session}.json`.
+Lo que sí es sensible (tokens y cookies) no vive en el repo: está en
+`~/.config/wallapop_cli/{credentials,session}.json`, fuera de git.
 
-**How the endpoints were found:**
+**Extracción de endpoints (historias de origen):**
 
-- The current search endpoints (`/search/components` + `/search/section`) were
-  found by inspecting the web's XHR requests in the browser and cross-checking
-  the JS bundle. `/general/search` is the older flow, kept as a working fallback.
-- The **offer** endpoints were recovered from the web app bundle:
-  `https://web-static.wallapop.com/angular/es/chunk-*.js` (hashes rotate with
-  the app version `8.2656.0`). Specifically:
-  - `chunk-WF7BPLHU.js` — the offer service defines the routes:
+- Los endpoints de búsqueda actuales (`/search/components` + `/search/section`)
+  se descubrieron inspeccionando las peticiones XHR de la web en el navegador y
+  cruzando con el bundle JS. `/general/search` es el flujo antiguo que la CLI
+  mantiene como fallback funcional.
+- Los endpoints de **ofertas** se recuperaron del bundle de la app web:
+  `https://web-static.wallapop.com/angular/es/chunk-*.js` (los hashes rotan
+  con la versión de la app `8.2656.0`). En concretos:
+  - `chunk-WF7BPLHU.js` — el servicio de ofertas define las rutas:
     `R="bff/delivery/offer-details"`, `h="api/v3/delivery/buyer/offers"`,
     `P="api/v3/delivery/offers"`, `U = .../{id}/status`,
     `v = .../{id}/offer-price`.
-  - `chunk-THOUZVB2.js` — the OTS modal component defines
-    `submitOfferResponse` (maps to `ACCEPTED`/`DECLINED` on `{id}/status`)
-    and `submitCounterOffer` (on `{id}/offer-price`).
-  Validated live: a `PATCH status` on an already closed offer returns
-  `409 invalid offer status` (the endpoint exists and really validates).
-- The `bff/messaging/*` endpoints belong to the Next.js SPA; the inbox returns
-  the most recent messages **first** (sort by `timestamp`).
-- Chat sending through PubNub REST was taken from observing the web: the
-  message is published to `ps7.pndsn.com` with `auth` = the token from
-  `/instant-messaging/token`, `pnsdk=PubNub-JS-Web/10.2.6`. Acknowledgment:
+  - `chunk-THOUZVB2.js` — el componente del modal OTS define
+    `submitOfferResponse` (mapea a `ACCEPTED`/`DECLINED` sobre `{id}/status`)
+    y `submitCounterOffer` (sobre `{id}/offer-price`).
+  Se validaron en vivo: un `PATCH status` sobre una oferta ya cerrada devuelve
+  `409 invalid offer status` (es decir, el endpoint existe y valida de verdad).
+- Los endpoints `bff/messaging/*` son de la SPA Next.js; el inbox devuelve los
+  mensajes más recientes **primero** (hay que ordenar por `timestamp`).
+- El envío de chat por REST PubNub se extrajo observando a la web: el mensaje
+  se publica a `ps7.pndsn.com` con `auth` = token de
+  `/instant-messaging/token`, `pnsdk=PubNub-JS-Web/10.2.6`. Acknowledgment
   `[1,"Sent",<timetoken>]`.
 
 ---
 
-## Authentication
+## Autenticación
 
 ### POST `/api/v3/access/login`
 
-The app's email + password login.
+Login email+password de la app.
 
 - Body: `{"email": ..., "password": ..., "client_id": "wallapop"}`
-- No previous token required.
-- Response: `data.access_token`, `data.refresh_token`, `data.user`.
-- Code: `Wallapop.login()`.
+- No requiere token previo.
+- Respuesta: `data.access_token`, `data.refresh_token`, `data.user`.
+- Código: `Wallapop.login()`.
 
 ### POST `/api/v3/access/refresh`
 
-Token renewal.
+Renovación de token.
 
 - Body: `{"refresh_token": ..., "client_id": "wallapop"}`
-- Response: `data.access_token` (+ a new `refresh_token`).
-- Code: `Wallapop.try_refresh()`.
+- Respuesta: `data.access_token` (+ nuevo `refresh_token`).
+- Código: `Wallapop.try_refresh()`.
 
 ### GET `https://es.wallapop.com/api/auth/session` [cookie]
 
-Turns the browser session (NextAuth) into a usable JWT.
+Convierte la sesión del navegador (NextAuth) en un JWT usable.
 
-- Needs the `__Secure-next-auth.session-token` cookie (plus `device_id`,
-  `device_fgp`, `accessToken` when available).
-- Response: JSON with a `token` field (the API JWT, i.e. `accessToken`).
-- Code: `refresh_web_session()`.
+- Necesita la cookie `__Secure-next-auth.session-token` (junto a
+  `device_id`, `device_fgp`, `accessToken` si las hay).
+- Respuesta: JSON con el campo `token` (JWT de la API). Es `accessToken`.
+- Código: `refresh_web_session()`.
 
 ---
 
-## Search
+## Búsqueda
 
 ### GET `/api/v3/search/components`
 
-Search bootstrap.
+Bootstrap de una búsqueda.
 
 - Params: `keywords`, `source=search_box`, `order_by`
   (`most_relevance` | `newest` | `price_low_to_high` | `price_high_to_low` |
-  `closest`), `filters_source=search_box`, optional `category_id`,
+  `closest`), `filters_source=search_box`, opcional `category_id`,
   `subcategory_ids`, `condition`, `min_sale_price`, `max_sale_price`,
   `is_shippable=true`, `latitude`, `longitude`.
-- **`category_id` must be top-level** (100, 12800, 24200...). A mid-level node
-  id (e.g. `24203`, child of `24200`) is accepted but silently returns
-  **0 results**. The client normalizes it to its root with
+- **`category_id` debe ser top-level** (100, 12800, 24200...). Un id de
+  node intermedio (p. ej. `24203`, hijo de `24200`) se acepta pero devuelve
+  **0 resultados** en silencio. La CLI lo normaliza a su raíz con
   `Wallapop().top_level_category()`.
-- **`subcategory_ids` without `category_id` returns 400** on this endpoint.
-  The client resolves the root automatically with
-  `Wallapop().category_for_subcategory()` (e.g. `10088` → `24200`).
-- The response carries the `search_id` needed to paginate.
-- Code: `Wallapop.search()`.
+- **`subcategory_ids` sin `category_id` devuelve 400** en este endpoint.
+  La CLI resuelve la raíz automáticamente con
+  `Wallapop().category_for_subcategory()` (p. ej. `10088` → `24200`).
+- De su respuesta se extrae `search_id` (clave para paginar).
+- Código: `Wallapop.search()`.
 
 ### GET `/api/v3/search/section`
 
-A results page (what the web renders after the bootstrap).
+Página de resultados (lo que la web monta tras el bootstrap).
 
-- Params: the previous ones + `search_id`, `section_type=organic_search_results`,
-  `source=deep_link`; for page 2+ add `next_page` (the cursor the API returns
-  in its `next_page` field).
-- Response: `...items[]` with raw listings.
-- **Page 1 can be empty yet carry `next_page`** — it happens with
-  `is_shippable=true` + `price_low_to_high`: the API leaves the first page as a
-  placeholder (shippable items start on page 2). `_search_sections()` follows
-  the cursor even on empty pages and does not count them against `pages`.
-- Code: `Wallapop._search_sections()`.
+- Params: los del paso anterior + `search_id`, `section_type=organic_search_results`,
+  `source=deep_link`; para página 2+ añadir `next_page` (cursor que devuelve
+  la propia API en el campo `next_page`).
+- Respuesta: `...items[]` con los anuncios sin normalizar.
+- **Página 1 puede venir vacía pero con `next_page`** — ocurre con
+  `is_shippable=true` + `price_low_to_high`: la API deja la primera página
+  como placeholder (los items con envío real quedan a partir de la página 2).
+  `_search_sections()` sigue el cursor aunque la página venga sin items y no
+  descuenta esas páginas vacías del presupuesto de `--pages`.
+- Código: `Wallapop._search_sections()`.
 
 ### GET `/api/v3/categories?context=search`
 
-The full search category catalogue — **the canonical source of the web's
-sidebar menu** (`es.wallapop.com/search`). Verified with Playwright against the
-real sidebar (see "Subcategory verification" below).
+Catálogo completo de categorías para el buscador — **la fuente canónica del
+menú lateral de la web** (`es.wallapop.com/search`). Verificado con Playwright
+contra el sidebar real (véase "Verificación" abajo).
 
-- Params: `context=search` (required).
-- Response: `{"categories": [...]}` with nodes `{id, name, vertical_id,
-  attributes, subcategories[]}`. `subcategories` is **recursive**, with
-  `parent_id` at every level; leaves have `subcategories: []`.
-- Names come back **localized** to the request locale (`Accept-Language`):
-  without a locale the API answers in Spanish (`Coches`, `Motos`…), while a
-  browser in `en-*` shows `Cars`, `Motorbike`… Same `id`.
-- Code: `Wallapop.categories()`.
-- Validated snapshot of the full tree: `docs/categories.json`.
+- Params: `context=search` (obligatorio).
+- Respuesta: `{"categories": [...]}` con nodos `{id, name, vertical_id,
+  attributes, subcategories[]}`. `subcategories` es **recursivo**, con
+  `parent_id` en cada nivel; los nodos hoja tienen `subcategories: []`.
+- Los nombres se devuelven **localizados** según el locale de la petición
+  (Acepta-Language): sin locale el API responde en español (`Coches`, `Motos`…),
+  mientras el navegador en `en-*` muestra `Cars`, `Motorbike`… Mismo `id`.
+- Código: `Wallapop.categories()`.
+- Snapshot del árbol completo validado: `docs/categories.json`.
 
-The 18 **top-level** categories (id | name, Spanish locale):
+Las 18 categorías **top-level** (id | nombre, localizadas a ES):
 
-| id | name |
-|----|------|
-| 100 | Coches (cars) |
-| 14000 | Motos (motorbikes) |
-| 12800 | Motor y accesorios (motor & accessories) |
-| 12465 | Moda y accesorios (fashion & accessories) |
-| 200 | Inmobiliaria (real estate) |
-| 24200 | Tecnología y electrónica (tech & electronics) |
-| 12579 | Deporte y ocio (sports & leisure) |
-| 17000 | Bicicletas (bikes) |
-| 12467 | Hogar y jardín (home & garden) |
-| 13100 | Electrodomésticos (appliances) |
-| 12463 | Cine, libros y música (movies, books & music) |
-| 12461 | Niños y bebés (kids & babies) |
-| 18000 | Coleccionismo (collectibles) |
-| 19000 | Construcción y reformas (construction & renovation) |
-| 20000 | Industria y agricultura (industry & agriculture) |
-| 21000 | Empleo (jobs) |
-| 13200 | Servicios (services) |
-| 12485 | Otros (other) |
+| id | nombre |
+|----|--------|
+| 100 | Coches |
+| 14000 | Motos |
+| 12800 | Motor y accesorios |
+| 12465 | Moda y accesorios |
+| 200 | Inmobiliaria |
+| 24200 | Tecnología y electrónica |
+| 12579 | Deporte y ocio |
+| 17000 | Bicicletas |
+| 12467 | Hogar y jardín |
+| 13100 | Electrodomésticos |
+| 12463 | Cine, libros y música |
+| 12461 | Niños y bebés |
+| 18000 | Coleccionismo |
+| 19000 | Construcción y reformas |
+| 20000 | Industria y agricultura |
+| 21000 | Empleo |
+| 13200 | Servicios |
+| 12485 | Otros |
 
-> Categories without subcategories: 100, 14000, 200, 12485.
-> `config.CATEGORIES` (the offline name table) uses these real ids; older ids
-> (12545, 16000, 15000, 12900…) were obsolete.
+> Categorías sin subcategorías: 100, 14000, 200, 12485.
+> Nota: `config.CATEGORIES` (tabla offline de nombres de la CLI) se corrigió
+> con estos ids reales — los antiguos (12545, 16000, 15000, 12900…) estaban
+> obsoletos y faltaban 12800, 24200 y 12485.
 
-### Subcategory verification (Playwright)
+### Verificación de subcategorías (Playwright)
 
-Clicking the sidebar tree opens **one submenu per level** and every selection
-produces a URL with `subcategory_ids=<id>` **equal to the `id` in the API
-tree**. A real capture for category `12800` (Motor y accesorios):
+Haciendo clic en el árbol lateral se abre **un submenú por cada nivel** y cada
+selección genera una URL con `subcategory_ids=<id>` **igual al `id` del árbol de
+la API**. Ejemplo real capturado — categoría `12800` (Motor y accesorios):
 
-| Menu subcategory (EN) | `subcategory_ids` | API node (ES) |
+| Subcategoría del menú (EN) | `subcategory_ids` | Nodo API (ES) |
 |---|---|---|
 | GPS & electronics | `10164` | GPS y electrónica |
 | Car & van spare parts | `10167` | Recambios de coches y furgonetas |
@@ -187,338 +193,273 @@ tree**. A real capture for category `12800` (Motor y accesorios):
 | Motorbike and four-wheeler spare parts | `10168` | Recambios de motos y cuatriciclos |
 | Others | `10166` | Otros |
 
-And **two levels deep** — category `24200`, subcategory `Sound` → `Headphones`
+Y a **dos niveles** — categoría `24200`, subcategoría `Sound` → `Headphones`
 (`24149` → `10395`):
 
 ```
 ...search?category_id=24200&subcategory_ids=24149   # Sound
-...search?category_id=24200&subcategory_ids=10395   # Headphones (grandchild)
+...search?category_id=24200&subcategory_ids=10395   # Headphones (nieto)
 ```
 
-Both match the ids of the recursive `/categories` tree. Rule of thumb: **a
-sidebar `name` = the localized `name` of the tree node with the same `id`**, so
-the CLI's `--subcat` and any web URL's `subcategory_ids` point at the same tree.
+Ambos coinciden con los ids del árbol recursivo de `/categories`. La brújula
+práctica: **un `name` del menú lateral = el `name` localizado de un nodo del
+árbol con el mismo `id`**. Con esto, `--subcat` de la CLI y los `subcategory_ids`
+de cualquier URL de la web apuntan al mismo árbol.
 
 ### GET `/api/v3/general/search` (legacy)
 
-Older alternative used when `/search/components` returns no `search_id`.
+Alternativa antigua si `/search/components` no devuelve `search_id`.
 
-- Params: `keywords`, `order_by`, `filters_source`, `source`, optional
+- Params: `keywords`, `order_by`, `filters_source`, `source`, opcional
   `category_ids` (plural), `subcategory_ids`, `condition`, `min_sale_price`,
   `max_sale_price`, `is_shippable=true`, `latitude`, `longitude`,
   `distance=1000000`.
-- Response: `search_objects[]`.
-- Code: `Wallapop._search_legacy()`.
+- Respuesta: `search_objects[]`.
+- Código: `Wallapop._search_legacy()`.
 
-### Geographic behaviour (how country/scope is decided)
+### Comportamiento geográfico (cómo decide el país/alcance)
 
-Found by reproducing the real browser flow (`es.wallapop.com/search`); it
-matters to anyone calling `search()`:
+Esto es lo que descubrimos reproduciendo el flujo del navegador real
+(`es.wallapop.com/search`), e importa para quien llame a `search()`:
 
-- **Without `latitude`/`longitude` the API returns 0 results.** The backend has
-  no default: it needs a geographic anchor. The web "does not notice" because
-  the browser **geolocates by IP/session** and always sends coordinates +
-  `search_country`.
-- **`search_country` weighs the most.** The country of the returned items
-  depends mainly on this param (+ coordinates). Verified:
-  - `PL coords + search_country=PL` → 0 items (no GameCubes anchored to PL).
-  - `PL coords + search_country=ES` → 40 items **from Spain** (country wins
-    over coordinates).
-  - `ES coords + search_country=ES` → 40 items (39 ES + 1 PT near the border).
-- **The country barely filters content**; it only affects ordering (with
-  `order_by=closest`) and shipping/currency flags. With
-  `order_by=most_relevance` items come from the `search_country`.
-- **`order_by=newest` ignores the country** and returns a more global set
-  (Spain mixed with other countries), as the app sometimes does.
-- **`distance` does not widen the scope** in the `/search/components` +
-  `/search/section` flow (tried 1M and 50M: same result). The legacy
-  `/general/search` accepts `distance` but currently returns 0 items.
+- **Sin `latitude`/`longitude` el API devuelve 0 resultados.** El backend no
+  tiene default: necesita un ancla geográfica para decidir qué mostrar. La web
+  "no lo nota" porque el navegador **geolocaliza por IP/sesión** y manda
+  coords + `search_country` siempre — no es que la web no use coords, es que
+  las calcula por ti.
+- **`search_country` es el que más manda.** El país devuelto en los items
+  depende sobre todo de este param (+ coords). Verificado:
+  - `coords PL + search_country=PL` → 0 items (no hay gamecubes anclados a PL).
+  - `coords PL + search_country=ES` → 40 items **de España** (el país domina
+    sobre las coords).
+  - `coords ES + search_country=ES` → 40 items (39 ES + 1 PT de frontera).
+- **El país casi no filtra los resultados por contenido**, solo influye en el
+  orden (con `order_by=closest`) y en flags de envío/moneda. Con
+  `order_by=most_relevance` los items salen del país de `search_country`.
+- **`order_by=newest` ignora el país** y devuelve un conjunto más global
+  (p. ej. mezcla de España + otros países), igual que pasa en la app cuando "a
+  veces te saca cosas de Italia o Portugal".
+- **`distance` no amplía el alcance** en el flujo `/search/components` +
+  `/search/section` (probado con 1M y 50M: mismo resultado). El legacy
+  `/general/search` acepta `distance` pero hoy devuelve 0 items.
 
-### Library default
+### Default de la librería
 
-`Wallapop.search()` defaults to **Spain** (`CITIES["espana"]` = 40.0, -3.5)
-when no `latitude`/`longitude` are given. Verified to return **exactly** the
-same items (same ids and order) as `search_country=ES` with Spanish
-coordinates, i.e. it reproduces what you would see on `es.wallapop.com` in
-Spain. It is not a restriction: coordinates from another country (e.g.
-`CITIES["italia"]`) return that country's items.
+`Wallapop.search()` usa **España por defecto** (`CITIES["espana"]` = 40.0,
+-3.5) cuando no se pasan `latitude`/`longitude`. Verificado que devuelve
+**exactamente** los mismos items (mismos ids y orden) que `search_country=ES`
+con las coords españolas — es decir, reproduce la búsqueda que verías en ese
+país en `es.wallapop.com`. No es una restricción: si se pasan coords de otro
+país (p. ej. `CITIES["italia"]`), la búsqueda devuelve los items de ese país.
 
 ---
 
-## Listings
+## Anuncios
 
 ### GET `/api/v3/items/{id}`
 
-Public listing details (no auth).
+Detalle público de un anuncio (sin auth).
 
-- Response: the item's flat JSON (structured price, `user`, `web_slug`, …).
-- `images`: array of `{id, average_color, urls: {small, medium, big}}` with
-  `cdn.wallapop.com` URLs (one width per size: W320 / W640 / W800).
-  `Item.images` keeps the `medium` URLs (W640).
-- Code: `Wallapop.item()`, `Wallapop.download_images()` (`item()` is also used
-  to find the currency when sending an offer).
+- Respuesta: JSON plano del item (precio con su estructura, `user`,
+  `web_slug`, etc.).
+- `images`: array de `{id, average_color, urls: {small, medium, big}}` con
+  URLs a `cdn.wallapop.com` (cada size a un ancho: W320 / W640 / W800).
+  `Item.images` guarda las URLs `medium` (W640).
+- Código: `Wallapop.item()`, `Wallapop.download_images()` (también se usa
+  `item()` para averiguar la moneda al mandar una oferta).
 
-### GET `https://es.wallapop.com/item/{slug}`  [page]
+### GET `https://es.wallapop.com/item/{slug}`  [página]
 
-Reference → internal id resolution. The Next.js page embeds its first payload
-in `<script id="__NEXT_DATA__" type="application/json">`.
+Resolución de referencia → id interno. La página Next.js embebe el primer
+payload en `<script id="__NEXT_DATA__" type="application/json">`.
 
-- Reads `data.props.pageProps.item.id` (the literal slug can carry a suffix
-  that does not match the id).
-- Code: `resolve_internal_id()` (also accepts a URL or a 12-char hash).
-
-### GET `/api/v3/items/{id}/seller/other-items`
-
-More listings from the same seller (the web's "other items" rail).
-
-- Response: `data.items[]` (same item shape as `/items`).
-- Code: `Wallapop.other_items()`.
-
-### GET `/api/v3/items/{id}/seller-phone-number`
-
-The seller's phone number when it is visible to you.
-
-- Response: `{"phone_number": "..."}`; `""` when not applicable.
-- Code: `Wallapop.seller_phone_number()`.
-
-### GET `/api/v3/items/{id}/actions-allowed`
-
-Which actions you can take on a listing (the web's item page).
-
-- Response: array `[{type, allowed, cause}]` (e.g. `buy`, `send_offer`,
-  `message`, `phone`).
-- Code: `Wallapop.item_actions_allowed()`.
-
-### PUT `/api/v3/items/{id}/view`
-
-Registers a view (the web calls it when opening an item page). No body.
-
-- Code: `Wallapop.mark_viewed()`.
-
-### PUT `/api/v3/items/{id}/inactivate`
-
-The web profile's "Pause listing" switch. Empty body.
-
-- 204 when it pauses one of your listings; editing the listing
-  (`PUT /items/{id}`) puts it back online.
-- Returns 403 if the item is not yours (not 404: the service checks ownership,
-  not existence).
-- Code: `Wallapop.inactivate_item(item_id)`; CLI `wallapop inactivate <item>`;
-  MCP `pause_item`. Verified live (403 with someone else's item).
+- Extrae `data.props.pageProps.item.id` (el slug literal puede contener un
+  sufijo que no coincide con el id).
+- Código: `resolve_internal_id()` (aplica también si ya recibe un url o un
+  hash de 12 caracteres alfanuméricos).
 
 ---
 
-## Users and ratings
+## Usuarios y valoraciones
 
 ### GET `/api/v3/users/{user_id}`
 
-The seller's public profile (no auth).
+Perfil público del vendedor (sin auth).
 
-- Key fields: `micro_name` (name), `is_top_profile`, `location`,
+- Puntos clave: `micro_name` (nombre), `is_top_profile`, `location`,
   `register_date`, `seller_type`.
-- Does NOT include the rating (stars/reviews): that is `/stats` (average and
-  total) and `/reviews` (details).
-- Code: `Wallapop.seller()`.
+- NO trae la valoración (estrellas/reseñas) — eso va en `/stats` (media y
+  total) y `/reviews` (detalle).
+- Código: `Wallapop.seller()`; lo usa el comando CLI `seller` (nombre).
 
 ### GET `/api/v3/users/{user_id}/reviews`
 
-Detailed seller reviews (no auth).
+Reseñas detalladas del vendedor (sin auth).
 
-- Response: array (one per transaction). Each entry has
-  `review.rating_over_five` (1-5 stars), `review.scoring` (0-100),
-  `review.comments` (text) and `item.title` (what was sold).
-- Paginated, without the exact total; use `/stats` for the real average and total.
-- Code: `Wallapop.seller_reviews()`.
+- Respuesta: array (una por transacción). Cada ítem tiene
+  `review.rating_over_five` (estrellas 1-5), `review.scoring` (0-100),
+  `review.comments` (texto) y `item.title` (qué vendió).
+- El array está paginado y no expone el total exacto; para el promedio y el
+  total reales usa `/stats`.
+- Código: `Wallapop.seller_reviews()`; lo usa el comando CLI `seller`
+  (reseñas detalladas).
 
 ### GET `/api/v3/users/{user_id}/stats`
 
-Aggregated seller stats (no auth) — **the values the web shows on the item
-page** (e.g. "★ 4.9 · 465 reviews").
+Estadísticas agregadas del vendedor (sin auth) — **los valores que la web
+muestra en la página del item** (p. ej. "★ 4.9 · 465 reseñas").
 
-- `rating_average`: average stars (e.g. `4.9`).
-- `counters[]`: list of `{type, value}` including `reviews` (total reviews),
-  `publish`, `buys`, `sells`, `sold`.
-- Plus `shipping`, `deliveries_on_time_in_days`.
-- Code: `Wallapop.seller_stats()`.
-
-### GET `/api/v3/users/{user_id}/extra-info`
-
-Extra seller data the web uses on the item page.
-
-- Response: `response_rate` ("< 1 h"), `response_time`,
-  `scoring_stars`/`rating_average`, `validations.level` (e.g. `verified`),
-  `activity_level`. Verified live (200).
-- Code: `Wallapop.seller_extra_info()`; CLI `wallapop seller <id> --extra`.
-
-### GET `/api/v3/users/{user_id}/seller-info`
-
-Live it answers `404 Public info not found` for profiles without extra public
-data. Low priority: the relevant data is already in `/stats`, `/reviews` and
-`/extra-info`.
-
-### GET `/api/v3/users/{user_id}/items`
-
-All listings of a seller (public; the profile's listing grid).
-
-- Query: `page=0`, `max_items=25`.
-- Response: `{data: [items...], meta: {next: <cursor string>}}`. Paginate with
-  `since=<meta.next>`; every item carries its `web_slug` (→ `Item.url`).
-- Code: `Wallapop.seller_items(user_id, pages=...)`; CLI
-  `wallapop seller-items <id> [--max N]`; MCP `seller_items`.
-
-### GET `/api/v3/suggesters/nonlocated`
-
-Search box autocomplete (the web calls it while typing).
-
-- Query: `keyword=...`. Response:
-  `data.suggestions[].regular_suggestion.suggestion.{text, highlight, subtitle}`.
-- Code: `Wallapop.suggest(keyword, limit=...)`; CLI `wallapop suggest`; MCP `suggest`.
-- Verified live: `suggest "nintendo sw"` → 5 suggestions.
+- `rating_average`: media de estrellas (p. ej. `4.9`).
+- `counters[]`: lista de `{type, value}` incluyendo `reviews` (total de
+  reseñas), `publish`, `buys`, `sells`, `sold`.
+- Además `shipping`, `deliveries_on_time_in_days`.
+- Código: `Wallapop.seller_stats()`; lo usan `show` (media + nº de reseñas en
+  la línea del vendedor) y el comando CLI `seller` (valoración + stats).
 
 ---
 
-## Messaging
+## Mensajería
 
 ### POST `/api/v3/instant-messaging/conversation`
 
-Creates (or returns) the conversation for a listing. Idempotent. Answers 403
-on your own listing (sellers reply by conversation id instead).
+Crea (o devuelve) la conversación de un anuncio. Idempotente.
 
 - Body: `{"item_hash_id": <item hash>}`
-- The response carries `conversation_id`.
-- Code: `Wallapop.ensure_conversation()`.
+- De la respuesta se extrae `conversation_id`.
+- Código: `Wallapop.ensure_conversation()`.
 
 ### GET `/bff/messaging/conversation/{conversation_id}`  [BFF]
 
-A conversation's full thread.
+Hilo completo de una conversación.
 
-- Response: `with_user`, `item`, `channel`, `sale`, and
-  `messages.messages[]` (text, or a "delivery" payload for offers).
-- Messages arrive newest-first; sort by `timestamp`.
-- Code: `Wallapop.conversation_thread()`.
+- Respuesta: `with_user`, `item`, `channel`, `sale`, y
+  `messages.messages[]` (texto o payload de "delivery" para ofertas).
+- Nota: los mensajes llegan newest-first; hay que ordenar por `timestamp`.
+- Código: `Wallapop.conversation_thread()`.
 
 ### GET `/bff/messaging/inbox?page_size=30&max_messages=30`  [BFF]
 
-Inbox; each conversation includes its last N messages (newest-first) and the
-related `item`.
+Inbox; por conversación incluye sus N últimos mensajes (newest-first) y el
+`item` asociado.
 
-- Code: `Wallapop.inbox()`.
+- Código: `Wallapop.inbox()`.
 
 ### GET `/api/v3/instant-messaging/messages/unread`
 
-Unread counter (`unread_counter`).
+Contador de no leídos (`unread_counter`).
 
-- Code: `Wallapop.unread_count()`.
+- Código: `Wallapop.unread_count()`.
 
 ### GET `/api/v3/instant-messaging/token`
 
-PubNub token (used as `auth` when publishing).
+Token de PubNub (se usa como `auth` en el publish).
 
-- Response: `data.token`.
-- Code: `Wallapop.im_token()`.
+- Respuesta: `data.token`.
+- Código: `Wallapop.im_token()`.
 
 ### GET `https://ps7.pndsn.com/publish/{pub}/.../{channel}/0/{msg}`  [PubNub REST]
 
-The actual delivery of a chat message (what the web does).
+Entrega real de un mensaje de chat (así lo hace la web).
 
-- Path: `publish/{PUB_KEY}/{SUB_KEY}/0/{channel}/0/{json_url_encoded}`.
-- Params: `meta` (JSON with the message type, `to_user_hash`,
-  `from_user_hash` [= the JWT's `hashed_sub`], `conversation_hash`,
-  platform), `uuid` (= user hash), `requestid`, `pnsdk`, `auth`.
-- Success ack: `[1,"Sent",<timetoken>]`. Without an ack the outcome is
-  unknown; the transport never retries this write-shaped GET.
-- Code: `Wallapop.pubnub_publish()`.
+- Ruta: `publish/{PUB_KEY}/{SUB_KEY}/0/{channel}/0/{json_url_encoded}`.
+- Params: `meta` (JSON con tipo de mensaje, `to_user_hash`,
+  `from_user_hash` [= `hashed_sub` del JWT], `conversation_hash`,
+  platform), `uuid` (= hash de usuario), `requestid`, `pnsdk`, `auth`.
+- Ack de éxito: `[1,"Sent",<timetoken>]`.
+- Código: `Wallapop.pubnub_publish()`.
 
 ---
 
-## Offers
+## Ofertas
 
 ### POST `/api/v3/delivery/buyer/offers`
 
-Send an offer (the web's current flow; the old `/items/{id}/offers` is dead: 404).
+Enviar una oferta (flujo actual de la web; el viejo `/items/{id}/offers` está
+muerto: 404).
 
-- Body: `{"offer_id": <client-generated uuid>, "offer_price_amount":
+- Body: `{"offer_id": <uuid generado por el cliente>, "offer_price_amount":
   <float>, "offer_price_currency": "EUR", "item_ids": [<item id>],
-  "message": "..." (optional)}`.
-- If it fails with `400/422` and a message was attached, it is retried without it.
-- Code: `Wallapop.send_offer()`.
+  "message": "..." (opcional)}`.
+- Si manda falla `400/422` y había mensaje, se reintenta sin él.
+- Código: `Wallapop.send_offer()`.
 
 ### PATCH `/api/v3/delivery/offers/{offer_id}/status`
 
-Accept or decline an offer (e.g. a seller's counter-offer).
+Aceptar o rechazar una oferta (p. ej. la contraoferta de un vendedor).
 
 - Body: `{"status": "ACCEPTED" | "DECLINED"}`.
-- Verified behaviour: on an already closed offer it returns
-  `409 invalid offer status` (service validation, not anti-bot).
-- After accepting, the thread receives *"Oferta aceptada, ¡cómpralo ahora!
-  Esta oferta caduca en 24h."* ("Offer accepted, buy it now! This offer
-  expires in 24h."); after declining, *"Has rechazado la oferta."*.
-- Code: `Wallapop.offer_response()`.
+- Comportamiento real verificado: sobre una oferta ya cerrada devuelve
+  `409 invalid offer status` (validación del servicio, no bloqueo anti-bot).
+- Tras aceptar, el hilo recibe *"Oferta aceptada, ¡cómpralo ahora! Esta
+  oferta caduca en 24h."*; al rechazar, *"Has rechazado la oferta."*.
+- Código: `Wallapop.offer_response()`.
 
 ### PATCH `/api/v3/delivery/offers/{offer_id}/offer-price`
 
-Counter with a new price on an open offer (the web's "make a new offer" flow).
+Contraofertar un precio sobre una oferta abierta (flujo "hacer una nueva
+oferta" de la web).
 
 - Body: `{"offer_price_amount": <float>, "offer_price_currency": "EUR"}`.
-- Code: `Wallapop.counter_offer()`.
+- Código: `Wallapop.counter_offer()`.
 
 ### GET `/bff/delivery/offer-details?offer_id=`  [BFF]
 
-Payload of the "Offer Tracking Status" modal.
+Payload del modal "Offer Tracking Status".
 
-- Only meaningful when **we** are the party that must answer (the payload is
-  built for the current responder).
-- ⚠️ **Blocked by anti-bot for `urllib`**: it returns 302 → `/notAvailable`;
-  with `Sec-Fetch-*`/`mpid`/`trackinguserid` headers it becomes 200 but with
-  the SPA's HTML shell (not JSON). In a browser (Playwright + session cookies)
-  it does return JSON.
-- The library does not depend on it: it rebuilds the state from the chat
-  thread (`parse_offer_events`). Documented for completeness.
-- Code: `Wallapop.offer_details()` (diagnostics only).
+- Solo tiene sentido cuando **nosotros somos el que debe responder** (el
+  payload se genera para el respondiente actual).
+- ⚠️ **Bloqueado por anti-bot para `urllib`**: devuelve 302 →
+  `/notAvailable`, y con cabeceras `Sec-Fetch-*`/`mpid`/`trackinguserid`
+  pasa a 200 pero con el shell HTML de la SPA (no JSON). En navegador
+  (Playwright + cookies de sesión) sí devuelve el JSON.
+- La CLI no depende de él: reconstruye el estado desde el hilo de chat
+  (`parse_offer_events`). Se documenta por integridad y por si la entrega
+  cambia.
+- Código: `Wallapop.offer_details()` (actualmente solo diagnóstico).
 
 ### GET `/bff/delivery/make-an-offer?item_id=`  [BFF]
 
-Offer editor configuration.
+Config del editor de ofertas.
 
-- Response: `item.price.amount`, and inside `restriction`:
-  `max_offer_percentage` (discount limit) and `remaining_offers_per_day`.
-- Code: `Wallapop.make_offer_info()`; MCP `get_offer_constraints`.
+- Respuesta: `item.price.amount`, y dentro de `restriction`:
+  `max_offer_percentage` (límite de descuento) y
+  `remaining_offers_per_day`.
+- Código: `Wallapop.make_offer_info()`.
 
 ---
 
-## Offer ledger model (no extra API)
+## Modelo del ledger de ofertas (sin API extra)
 
-A negotiation's state is derived **offline** from the thread's messages:
+El estado de una negociación se deriva **offline** de los mensajes del hilo:
 
-- An offer message arrives as `type=delivery_generic` with a `payload` whose
-  `text` (or `buttons[].action` with `app/chat/offer/<uuid>`) identifies the
-  event; kinds: `our-offer`, `seller-counter`, `our-counter`,
+- El mensaje de oferta llega como `type=delivery_generic` con un `payload` cuyo
+  `text` (o `buttons[].action` con `app/chat/offer/<uuid>`) identifica el
+  evento; tipos: `our-offer`, `seller-counter`, `our-counter`,
   `seller-accepted`, `accepted-buy`, `seller-declined`, `our-declined`,
-  `expired`. The texts are Wallapop's own (Spanish), so the classifier matches
-  Spanish phrases.
-- Terminal messages (accepted/declined/expired) carry no amount: `amount` and
-  `offer_id` are forward-filled from the latest earlier event that has them.
-- Code: `parse_offer_events()` + `offer_state_summary()` (`models.py`); MCP
-  `get_offer_status`.
+  `expired`.
+- Los mensajes terminales (aceptado/rechazado/caducado) no traen importe:
+  se hace *forward-fill* del `amount`/`offer_id` desde el último evento
+  anterior con valor.
+- Código: `parse_offer_events()` + `offer_state_summary()` (`models.py`).
 
 ---
 
-## Publishing listings (upload / publish)
+## Publicar artículos (upload / publish)
 
-> Status: the full flow is mapped and publishing works through the **pure
-> API** (`wallapop publish`, MCP `publish_item`, no browser) and also **through
-> the browser** (`wallapop publish --mode browser`, `wallapop_mcp/publish.py`).
-> The `POST /api/v3/items` multipart body was captured with `page.route` +
-> `request.post_data_buffer` (CDP's `post_data` was `null`, but the binary
-> buffer is exposed) — that is the blueprint `Wallapop.publish()` replicates
-> (see "Final step: publish").
+> Estado: flujo completo mapeado y publicación funcionando por **API pura**
+> (`wallapop publish`, sin navegador) y también **vía navegador**
+> (`wallapop publish --mode browser`, módulo `wallapoplib/publish.py`).
+> El body multipart del `POST /api/v3/items` se capturó con
+> `page.route` + `request.post_data_buffer` (el `post_data` de CDP era `null`,
+> pero el buffer binario sí se expone) — ese es el plano que replica el método
+> `Wallapop.publish()` (ver "Paso final: publicar").
 
 ### POST `/api/v3/steps`  [state machine]
 
-The publishing wizard's engine. A stateless state machine: every request sends
-the full draft and returns the next `step.id` to resolve.
+Motor del wizard de publicación. Máquina de estados sin estado: cada petición
+envía el borrador completo y devuelve el siguiente `step.id` a resolver.
 
-**Common headers**: `Authorization: Bearer <token>`, `Content-Type: application/json`,
+**Headers comunes**: `Authorization: Bearer <token>`, `Content-Type: application/json`,
 `Origin: https://es.wallapop.com`, `X-AppVersion: 826590`, `X-DeviceOS: 0`,
 `X-DeviceID: <device_id>`.
 
@@ -529,8 +470,8 @@ POST /api/v3/steps
 {"mode": {"action": "upload", "id": "<upload_id>"}}
 ```
 
-- `upload_id` = client-generated UUID (identifies the draft).
-- Response: `{"step": {"id": "title", "components": [], "metadata": {}}}`.
+- `upload_id` = UUID generado por el cliente (identifica el borrador).
+- Respuesta: `{"step": {"id": "title", "components": [], "metadata": {}}}`.
 
 #### 2. title → photo
 
@@ -543,10 +484,10 @@ POST /api/v3/steps
 }
 ```
 
-- `summary` = title (max 50 chars; validated: no links, not only spaces, no emoji).
-- Response: `step.id: "photo"` with `picture_upload.path` = `/api/v3/upload/<upload_id>/pictures`,
-  `max_number_of_pictures: 1` (one photo per call), `timeout_ms: 20000`, `max_size_px: 768`,
-  and `pictures_item.max_number_of_pictures: 10` (max 10 photos per listing).
+- `summary` = título (máx 50 chars, valida: sin enlaces, no solo espacios, no emojis).
+- Respuesta: `step.id: "photo"` con `picture_upload.path` = `/api/v3/upload/<upload_id>/pictures`,
+  `max_number_of_pictures: 1` (una foto por llamada), `timeout_ms: 20000`, `max_size_px: 768`,
+  y `pictures_item.max_number_of_pictures: 10` (máx 10 fotos por anuncio).
 
 #### 3. photo → category
 
@@ -559,8 +500,8 @@ POST /api/v3/steps
 }
 ```
 
-- Same draft as the title step (no photo ids are sent; uploading is separate).
-- Response: `step.id: "category"` with `components: [{"id": "category", "type": "custom", ...}]`.
+- El body usa el **mismo draft** que title (no se mandan IDs de foto; la subida es aparte).
+- Respuesta: `step.id: "category"` con `components: [{"id": "category", "type": "custom", ...}]`.
 
 #### 4. category → listing
 
@@ -573,19 +514,19 @@ POST /api/v3/steps
 }
 ```
 
-- **`category_leaf_id` and `root_category_id` are STRINGS** ("10088", "24200"), not integers.
-- `category_leaf_id` = leaf (e.g. 10088 = consoles), `root_category_id` = root (24200 = tech & electronics).
-- Response: `step.id: "listing"`, `components: []`.
+- **`category_leaf_id` y `root_category_id` son STRINGS** ("10088", "24200"), no enteros.
+- `category_leaf_id` = hoja (ej. 10088 = Consolas), `root_category_id` = raíz (24200 = Tecnología y electrónica).
+- Respuesta: `step.id: "listing"`, `components: []`.
 
 #### 5. listing → (shipping → publish)
 
-The `listing` step is the attributes/price/description/condition/shipping form.
-Validated draft shape:
+El step `listing` es el formulario de atributos/precio/descripción/estado/envío.
+La estructura del draft validada:
 
 ```json
 {
   "summary": "Nintendo 3DS XL Azul Yveltal Edicion Pokemon",
-  "description": "Nintendo 3DS XL in good condition. Pokemon Yveltal blue edition. Charger included. Shipping available.",
+  "description": "Nintendo 3DS XL en buen estado. Edicion Pokemon Yveltal azul. Con cargador. Envio disponible.",
   "price_amount": "400",
   "category_id": "10088",
   "brand": "Nintendo",
@@ -595,28 +536,28 @@ Validated draft shape:
 }
 ```
 
-**Critical fields:**
-- `price_amount` = **string** "400" (not an int, not a `price: {amount, currency}` object).
+**Campos críticos:**
+- `price_amount` = **string** "400" (no int, no objeto `price: {amount, currency}`).
 - `category_id` = string "10088".
-- `condition` = string "good" (values: `un_opened`, `in_box`, `new`, `as_good_as_new`, `good`, `fair`, `has_given_it_all`).
-- `color` = string "blue" (not an array).
-- `brand`, `model` = optional strings.
-- `description` = string (max 640).
+- `condition` = string "good" (valores: `un_opened`, `in_box`, `new`, `as_good_as_new`, `good`, `fair`, `has_given_it_all`).
+- `color` = string "blue" (no array).
+- `brand`, `model` = strings opcionales.
+- `description` = string (máx 640).
 
-Sending the `draft` with every field → 200 but it **does not advance** (the next step is still `listing`).
+Enviar `draft` con todos los campos → 200 pero **no avanza** (siguiente step sigue siendo `listing`).
 
-### Photo upload: `POST /api/v3/upload/<upload_id>/pictures`
+### Subida de fotos: `POST /api/v3/upload/<upload_id>/pictures`
 
-One call per photo (max 10). Multipart `file` (image/jpeg).
-- Response: **204 No Content** (no photo ids in the body or headers).
-- Limit: `pictures_item.max_number_of_pictures: 10`.
+Una llamada por foto (máx 10). Multipart `file` (image/jpeg).
+- Respuesta: **204 No Content** (sin IDs de foto en respuesta ni headers).
+- Límite: `pictures_item.max_number_of_pictures: 10` (la carpeta puede tener más, solo suben 10).
 
 ### POST `/api/v3/items/upload/components`  [BDUI form schema]
 
-Serves the `listing` form schema (components) for the current draft. Called
-whenever a field with `reloads_when_changed: true` changes (e.g. `condition`).
+Sirve el esquema (components) del formulario `listing` para el borrador actual.
+Se invoca cada vez que cambia un campo con `reloads_when_changed: true` (ej. `condition`).
 
-Real request (**format confirmed from the browser**):
+Request real (**formato confirmado desde el navegador**):
 ```json
 {
   "fields": {
@@ -627,7 +568,7 @@ Real request (**format confirmed from the browser**):
     "model": "3DS",
     "color": "blue",
     "title": "Nintendo 3DS Azul Cobalto",
-    "description": "Nintendo 3DS console in cobalt blue...",
+    "description": "Consola Nintendo 3DS en color Azul Cobalto...",
     "condition": "good",
     "price_amount": "310"
   },
@@ -635,28 +576,28 @@ Real request (**format confirmed from the browser**):
 }
 ```
 
-- The body goes in **`fields`** + `mode` (same structure as `/steps`).
-- Every value is a **string** (`category_leaf_id` "10088", `price_amount` "310").
-- A first POST with only `summary`/`category` is sent on reaching `listing`,
-  and a second one **with every field** (price, condition, brand, model…) right
-  before publishing. Both return `200`.
-- Brand/model/color/title/description are autocompleted after the photo upload
-  (suggested-item-data); the user only edits price + condition + shipping.
+- El cuerpo va en **`fields`** + `mode` (misma estructura que `/steps`).
+- Todos los valores son **strings** (`category_leaf_id` "10088", `price_amount` "310").
+- Se hace un primer POST solo con `summary`/`category` al llegar a `listing`, y
+  un segundo POST **con todos los campos** (precio, condición, marca, modelo…)
+  justo antes de publicar. Ambos devuelven `200`.
+- Marca/modelo/color/título/descripción se autocompletan solos tras subir las
+  fotos (suggested-item-data); el usuario solo edita precio + condición + envío.
 
-200 response with an array of components (`text_input`, `combo_box`, `dropdown`, `custom`, `feature_banner`).
-Fields observed, in order:
-1. `suggested_data_banner` (feature_banner, not editable)
+Respuesta 200 con array de components (`text_input`, `combo_box`, `dropdown`, `custom`, `feature_banner`).
+Campos observados en orden:
+1. `suggested_data_banner` (feature_banner, no editable)
 2. `photo` (custom, `max_number_of_pictures: 10`)
-3. `brand` (combo_box, required, options via `/api/v3/attributes/brand/options?category_leaf_id=...`)
-4. `model` (combo_box, optional, options via `/api/v3/attributes/model/options?brand=...&category_leaf_id=...`)
-5. `color` (dropdown, optional)
-6. `title` (text_input, required, max_length: 50, validated: no links)
-7. `description` (text_area, required, max_length: 640)
-8. `condition` (dropdown, required, `reloads_when_changed: true`)
-9. `price_amount` (text_input, required, shipping range 1–2500 €)
-10. `lock_stocks` (lock, optional, "add more units", `root_category_id: 24200`)
+3. `brand` (combo_box, requerido, opciones via `/api/v3/attributes/brand/options?category_leaf_id=...`)
+4. `model` (combo_box, opcional, opciones via `/api/v3/attributes/model/options?brand=...&category_leaf_id=...`)
+5. `color` (dropdown, opcional)
+6. `title` (text_input, requerido, max_length: 50, valida: sin enlaces)
+7. `description` (text_area, requerido, max_length: 640)
+8. `condition` (dropdown, requerido, `reloads_when_changed: true`)
+9. `price_amount` (text_input, requerido, rango envío 1–2500 €)
+10. `lock_stocks` (lock, opcional, "Añadir más unidades", `root_category_id: 24200`)
 
-### Shipping configuration (used by the listing form)
+### Config de envío (consumida por el formulario listing)
 
 **GET `/api/v3/delivery/weight/tiers/with-suggestion`**
 ```json
@@ -673,34 +614,34 @@ Fields observed, in order:
  "price_range_allowed": {"min_price": 1.0, "max_price": 2500.0}}
 ```
 
-### Final step: publish
+### Paso final: publicar
 
-The POST that creates the final listing (confirmed with real listings):
+El POST que crea el anuncio definitivo (confirmado con publicaciones reales):
 
 ```http
 POST /api/v3/items
 ```
 
-**Verified live**: 200 and the item is created. After the POST the web calls
-`GET /api/v3/items/<id>?language=es` (the new id) and uploads the remaining
-photos with `POST /api/v3/items/<id>/picture2` (one per photo, all 200), then
-redirects to `/app/catalog/published`.
+**Verificado en vivo**: 200 y crea el item (hemos publicado artículos reales). Tras el
+POST la web hace `GET /api/v3/items/<id>?language=es` (el nuevo id) y sube las fotos
+finales con `POST /api/v3/items/<id>/picture2` (una por foto, todas 200), luego
+redirige a `/app/catalog/published`.
 
-**Real POST headers** (browser CDP capture):
-- The OPTIONS preflight asks for `Access-Control-Request-Headers: authorization,x-deviceos`.
-- The POST sends `Authorization: Bearer <token>`, `Content-Type: multipart/form-data;
+**Headers reales del POST** (captura CDP del navegador):
+- Preflight OPTIONS pide `Access-Control-Request-Headers: authorization,x-deviceos`.
+- El POST manda `Authorization: Bearer <token>`, `Content-Type: multipart/form-data;
   boundary=...`, `Accept: application/vnd.upload-v2+json`, `x-deviceos: 0`,
   `Origin/Referer: https://es.wallapop.com`.
 
-**Full multipart body** (captured with `page.route('**/api/v3/items')` +
-`request.post_data_buffer`; 966 B without the photo):
+**Body multipart completo** (capturado con `page.route('**/api/v3/items')` +
+`request.post_data_buffer`, sin el decode que rompía con un JPEG; 966 B sin foto):
 
 ```
 ------WebKitFormBoundary<...>
-Content-Disposition: form-data; name="image"; filename="photo.jpg"
+Content-Disposition: form-data; name="image"; filename="foto.jpg"
 Content-Type: image/jpeg
 
-<photo bytes>
+<bytes de la foto>
 ------WebKitFormBoundary<...>
 Content-Disposition: form-data; name="item"
 
@@ -713,54 +654,52 @@ Content-Disposition: form-data; name="item"
 ------WebKitFormBoundary<...>--
 ```
 
-Only two fields: **`image`** (the photo, generic filename) and **`item`** (JSON):
-- `attributes.price_amount` is a **number** (330, unquoted), unlike the
-  `"310"` string of the `components` schema. Cents are allowed.
-- `location` = the seller's **non-approximated** lat/lon, taken from
+Solo dos campos: **`image`** (la foto, filename genérico) y **`item`** (JSON):
+- `attributes.price_amount` es un **entero** ("330" sin comillas), a diferencia del
+  `"310"` (string) del esquema `components`.
+- `location` = lat/lon **no aproximados** del vendedor, que se obtienen de
   `GET /api/v3/users/me` (`location.approximated_latitude`, `.approximated_longitude`,
   `.approximated_location`).
-- `delivery.cost_configuration_id` is a **per-account constant UUID** (the same
-  as `shipping.cost_configuration_id` of any listing the user published).
-- `upload_id` = client-generated UUID (the same `mode.upload.id`).
-- `color` must be omitted on color-less categories (see
-  `docs/multi-photo-upload.md`).
-- 200 response: `{"id":"<item id>","flags":{}}` — **the listing id comes back
-  in the POST response**.
+- `delivery.cost_configuration_id` es un **UUID constante por cuenta** (el mismo que
+  devuelve `shipping.cost_configuration_id` de cualquier item publicado del usuario).
+- `upload_id` = UUID generado por el cliente (el mismo `mode.upload.id`).
+- Respuesta 200: `{"id":"<item id>","flags":{}}` — **el id del anuncio viene en la
+  respuesta del POST** (no hay que hacer GET posterior para conocerlo).
 
-**Implementation — pure API, no browser**: `Wallapop.publish()` (`client.py`)
-replicates that multipart (photo + `item` JSON) over plain HTTP. It fills
-`location` from `GET /users/me`, `cost_configuration_id` from any published item
-of the account (with a known fallback) and `upload_id` with a fresh UUID. Extra
-photos go through `picture2`. Verified live: 200 `{"id":...}`, the listing shows
-up published with its photos. It is the default mode of `wallapop publish`;
-`--mode browser` keeps the Playwright wizard.
+**Implementación — API pura sin navegador**: `Wallapop.publish()` (`client.py`)
+replica exactamente ese multipart (foto + JSON `item`) y publica con HTTP plano.
+Rellena `location` con `GET /users/me`, `cost_configuration_id` con el de cualquier
+item publicado de la cuenta (fallback a un valor conocido) y `upload_id` con un UUID
+fresco. Verificado en vivo: 200 `{"id":...}`, el anuncio aparece publicado y con la
+foto. Es el modo por defecto de `wallapop publish`; `--mode browser` conserva el
+wizard Playwright.
 
-The created listing (published item shape) reveals:
+El anuncio creado (estructura de un item publicado) revela:
 - `price: {cash: {amount, currency: "EUR"}}`
 - `shipping: {item_is_shippable: true, user_allows_shipping: true, cost_configuration_id: "..."}`
 - `location: {lat, lon, city, postal_code}`
-- `type_attributes` includes `up_to_kg: "1.0"` (the chosen weight tier)
-- `condition`, `brand`, `model`, `color` (the same as the form)
+- `type_attributes` incluye `up_to_kg: "1.0"` (tramo de peso elegido)
+- `condition`, `brand`, `model`, `color` (los mismos del formulario)
 
-Reference endpoints in the JS bundle:
+Endpoints de referencia en bundle JS:
 - `chunk-B5DKKJDO.js` — payload builder `ce` → POST `/api/v3/items`
-- `chunk-IQHJVPZ3.js` — wizard steps (`POST /api/v3/steps`, `suggested-item-data`, constants `SUMMARY, CATEGORY, PHOTO, LOADING, LISTING, ISBN`)
+- `chunk-IQHJVPZ3.js` — wizard steps (`POST /api/v3/steps`, `suggested-item-data`, constantes `SUMMARY, CATEGORY, PHOTO, LOADING, LISTING, ISBN`)
 - `chunk-3WKBKU6R.js` — `api/v3/items/upload/components`
 
-## Editing a published listing
+## Editar un anuncio publicado
 
-### PUT `/api/v3/items/{id}`  [edit / update]
+### PUT `/api/v3/items/{id}`  [editar/actualizar]
 
-Edits a published listing (what the web does on "Update" in the editor).
-Captured with `page.on("request")` during a real edit (2026-09-06).
+Edita un anuncio ya publicado (lo que hace la web al pulsar "Actualizar" en el
+editor). Capturado con `page.on("request")` durante una edición real (2026-09-06).
 
-**Verified live**: every editable attribute returns **204** and the change shows
-up in `GET /items/<id>`.
+**Verificado en vivo**: todos los atributos editables devuelven **204** y el
+cambio se refleja al hacer `GET /items/<id>`.
 
-**Real PUT headers** (required — without them it is 404 `null for uri`):
+**Headers reales del PUT** (imprescindibles — sin ellos da 404 `null for uri`):
 ```http
 PUT /api/v3/items/<id>
-Accept: application/vnd.upload-v2+json       # the MOST important one
+Accept: application/vnd.upload-v2+json       # el MÁS importante
 Accept-Language: es,es-ES;q=0.9
 Authorization: Bearer <token>
 Content-Type: application/json
@@ -773,17 +712,13 @@ X-DeviceOS: 0
 mpid: <mpid>
 trackinguserid: <mpid>
 ```
-- `PATCH /items/<id>`, or this PUT **without** `Accept: application/vnd.upload-v2+json`
-  → `404 null for uri` (not CORS nor auth: that header selects the handler).
-- `pictures[].id` are the item's photo ids (from `GET /items/<id>` → `images[].id`),
-  not the item id.
-- Reading the current state: the versioned GET (`Accept:
-  application/vnd.upload-v2+json`) now answers `406`, so `edit_item` reads the
-  plain `GET /items/<id>` and maps its live shape (attributes under
-  `type_attributes`, category under `taxonomy[-1].id`, price under
-  `price.cash.amount`).
+- `PATCH /items/<id>` y el mismo PUT **sin** `Accept: application/vnd.upload-v2+json`
+  → `404 null for uri` (no es CORS ni auth: es el header que selecciona el handler).
+- `pictures[].id` son los ids de las fotos del item (de `GET /items/<id>` → `images[].id`),
+  no el id del item.
 
-**Full JSON body** (the web ALWAYS sends every field):
+**Body JSON completo** (la web manda SIEMPRE todos los campos, con cada atributo
+propuesto en el form):
 ```json
 {
   "attributes": {
@@ -791,195 +726,158 @@ trackinguserid: <mpid>
     "model": "3DS",
     "color": "blue",
     "title": "Nintendo 3DS Azul Cobalto",
-    "description": "Console in good condition...",   // plain STRING, not the {original} dict
+    "description": "Consola en buen estado...",   // STRING plano, no el dict {original}
     "condition": "good",
-    "price_amount": 520
+    "price_amount": 520                            // entero
   },
   "category_leaf_id": "10088",
   "apply_discount": false,
   "location": {"latitude": 43.66, "longitude": -7.60, "approximated": false},
   "delivery": {"allowed_by_user": true, "max_weight_kg": 1,
-               "cost_configuration_id": "<the item's uuid>"},
-  "pictures": [{"id": "<photo_id>", "order": 0}]
+               "cost_configuration_id": "<uuid del item>"},
+  "pictures": [{"id": "<foto_id>", "order": 0}]
 }
 ```
-- `description` must be a **plain string**. `GET /items/<id>` returns it as
-  `{"original": "..."}`; sending that dict back gets a `400`.
-- `location` and `cost_configuration_id` come from `GET /users/me` and the item.
+- `description` debe ir como **string plano**. `GET /items/<id>` la devuelve como
+  `{"original": "..."}`; si reenvías ese dict, el backend responde `400`.
+- `location` y `cost_configuration_id` se toman de `GET /users/me` y del item.
 
-**Attributes verified editable one by one (all 204, 2026-09-06)**:
+**Atributos verificados editables uno por uno (todos 204, 2026-09-06)**:
 `brand`, `model`, `color`, `title`, `description`, `condition`, `price_amount`,
-`max_weight_kg`, `category_leaf_id` (moves the listing to another category).
-The rest of the body must be sent unchanged (the web re-sends the whole form).
-Code: `Wallapop.edit_item()`; CLI `wallapop edit`; MCP `edit_item`.
+`max_weight_kg`, `category_leaf_id` (mueve el anuncio de categoría). El resto del
+body debe ir como estaba (la web reenvía el formulario completo).
 
-### Adding photos and changing the cover
+### Añadir imágenes y cambiar la principal
 
-- **Add**: `POST /api/v3/items/<id>/picture2` (multipart `image` = full JPEG
-  bytes + `order` as a string) → 200 with the **new photo id**. One image per
-  call. (Same recipe as multi-photo publishing; see `docs/multi-photo-upload.md`.)
-- **Change the cover / reorder**: `PUT /api/v3/items/<id>` with `pictures`
-  listing the photos in the wanted order: `order: 0` = cover. A photo left out
-  disappears from the listing (verified live: replacing an item's image and
-  adding 2 more, leaving 3 photos with the new one as cover).
+- **Añadir**: `POST /api/v3/items/<id>/picture2` (multipart `image` = bytes JPEG
+  completos + `order` como string) → 200 con el **id de la foto nueva**. El item
+  gana una imagen por llamada. (Misma receta que para publicar multi-foto; ver
+  `docs/multi-photo-upload.md`.)
+- **Cambiar la principal / reordenar**: `PUT /api/v3/items/<id>` con
+  `pictures` listando las fotos en el orden deseado: `order: 0` = principal.
+  La foto que se omite deja de aparecer en el anuncio (verificado en vivo:
+  sustituir la imagen de `p618gorvp5z5` y añadir 2 más, quedando 3 fotos con la
+  nueva como portada).
 
-### Reserve an item: `PUT /api/v3/items/<id>/reserve`
+### Reservar un artículo: `PUT /api/v3/items/<id>/reserve`
 
 ```http
 PUT /api/v3/items/<id>/reserve
 Content-Type: application/json
-Body: {"reserved": true}     # to unreserve: {"reserved": false}
+Body: {"reserved": true}     # para desreservar: {"reserved": false}
 ```
 
-- Returns **204**. Check with `GET /items/<id>` → `reserved` becomes
-  `{"flag": true}`, or `null` after unreserving.
-- Validated through the pure API with the client's base headers (2026-09-06),
-  and the web's seller "Reserve" button sends exactly the same request.
-- Does not need the edit PUT's `Accept: application/vnd.upload-v2+json`.
-- Code: `Wallapop.reserve()`; CLI `wallapop reserve`; MCP `reserve_item`.
+- Devuelve **204**. Se verifica con `GET /items/<id>` → el campo `reserved`
+  pasa a `{"flag": true}` o queda `null` al desreservar.
+- Validado por API pura con los headers base del CLI (2026-09-06): publicado
+  un item de prueba y marcado reservado con este PUT → 204. Confirmado además
+  que el botón "Reservar" de la web vendedor manda exactamente el mismo.
+- No exige el `Accept: application/vnd.upload-v2+json` del PUT de edición.
 
-### Mark an item as sold: `PUT /api/v3/items/<id>/sold`
+### Marcar un artículo como vendido: `PUT /api/v3/items/<id>/sold`
 
 ```http
 PUT /api/v3/items/<id>/sold
 Content-Type: application/json
-Body: {}                                  # empty
+Body: {}                                  # vacío
 ```
 
-- Returns **204**, no body. `GET /items/<id>` → `sold` becomes
-  `{"flag": true}`, both through the web flow and the pure API.
-- Captured live from the web: the "Mark as sold" button opens a modal whose
-  final confirm fires exactly this `PUT /items/<id>/sold`.
-- Unlike `reserve`, the body is empty and the resulting flag is `sold`. The
-  client undoes it with `{"sold": false}` (the web has no "unsell" button).
-- Code: `Wallapop.mark_sold()`; CLI `wallapop sold`; MCP `mark_sold`.
+- Devuelve **204** sin body. Verificado con `GET /items/<id>` → el campo
+  `sold` pasa a `{"flag": true}`, tanto por el flujo de la web como por API
+  pura (`PUT /items/<id>/sold` con `body={}` y headers base del CLI).
+- Capturado en vivo desde la web vendedor: el botón "Marcar como vendido"
+  abre un modal y el confirm final dispara justo este `PUT /items/<id>/sold`
+  (con la cookie de sesión; mismo request que manda la API con auth bearer).
+- Es distinto de `reserve`: aquí el body es vacío y el flag resultante es
+  `sold`, no `reserved`. No se capturó des-marcar (no hay botón de
+  "desvender" en la web).
+- Verificado en tres anuncios de prueba (2026-09-06): `p618gorvp5z5`,
+  `8z8871mrqdz3` y `8z8871mpkdz3` (web) y `mzn3nlyqq2jn` (API pura,
+  vendido además con `body={}` quedando `sold: {"flag": true}`).
 
-### Favorite / unfavorite: `PUT /api/v3/items/{id}/favorite`
+### Marcar/desmarcar un artículo como favorito: `PUT /api/v3/items/{id}/favorite`
 
 ```http
 PUT /api/v3/items/{id}/favorite
 Content-Type: application/json
-Body: {"favorited": true}     # to unfavorite: {"favorited": false}
+Body: {"favorited": true}     # para desmarcar: {"favorited": false}
 ```
 
-- Returns **204**, no body. `GET /items/{id}` → `favorited` becomes
-  `{"flag": true}` (or `false`/`null` after unfavoriting).
-- Captured from the web (HAR): the heart button on the item page fires this PUT.
-- Needs only the client's base headers (`Authorization`, `Content-Type`,
-  `Origin`, `X-DeviceID`, `X-AppVersion`, `X-DeviceOS`).
-- The web bundle defines the route as `api/v3/items/{id}/favorite`
-  (exported as `itemFavoriteUrl`).
-- Code: `Wallapop.favorite(item_id, favorited)`; MCP `set_favorite`.
+- Devuelve **204** sin body. Se verifica con `GET /items/{id>` → el campo
+  `favorited` pasa a `{"flag": true}` (o queda `false`/`null` al desmarcar).
+- Capturado desde la web (HAR): el botón de corazón en la página del item
+  dispara este PUT con body `{"favorited": true}`.
+- Los headers necesarios son los base del CLI (`Authorization`, `Content-Type`,
+  `Origin`, `X-DeviceID`, `X-AppVersion`, `X-DeviceOS`). No necesita el header
+  `Accept: application/vnd.upload-v2+json` del PUT de edición.
+- El bundle JS de la web define la ruta como `api/v3/items/{id}/favorite`
+  (chunk 23852, exportado como `itemFavoriteUrl`).
+- Código: `Wallapop.favorite(item_id, favorited)` (client.py).
 
-### GET `/api/v3/favorite-lists`
-
-The full favorites list of **your account** (the web's "Favorites" page,
-`/favorites`). Authenticated.
-
-- Response: `{data: [items...], meta: {next: <cursor string>}}`; as with
-  `GET /users/{id}/items`, paginate with `since=<meta.next>`.
-- Verified live: 200 → `{data: [], meta: {}}` with no favorites.
-- Code: `Wallapop.favorite_lists(pages=...)`; CLI `wallapop favorites`; MCP
-  `list_favorites`.
-
-### POST/DELETE `/api/v3/favorite-lists/{list_id}/items`
-
-Add/remove an item to/from a favorites list.
-
-- `POST /favorite-lists/{list_id}/items` → body
-  `{"items": [{"id": "<item_id>", "is_favorited": true}]}`.
-- `DELETE /favorite-lists/{list_id}/items/{item_id}`.
-- Code: `Wallapop.favorite_list_add(list_id, item_id)` /
-  `favorite_list_remove(list_id, item_id)`.
-
-### Saved searches / alerts: `/api/v3/searchalerts/savedsearch`
-
-The web's **search alerts** (the saved searches badge). Authenticated. Four
-resources:
-
-`POST /api/v3/searchalerts/savedsearch` with the search filters as query
-params (`keywords`, `category_id`, `min_sale_price`, `max_sale_price`,
-`latitude`, `longitude`, `max_radius_kms`, `order_by`, `filters_source`...).
-
-- → **201**, empty body, with the search **UUID** in the header
-  `Location: /api/v3/searchalerts/savedsearch/<uuid>` (a UUID string, **not**
-  an int). Code: `Wallapop.save_search(params) → str`; MCP `save_search`.
-- `HEAD /api/v3/searchalerts/savedsearch/exists?<same params>` →
-  **200** + `Location` with the UUID when it exists; **404** otherwise.
-  Code: `Wallapop.saved_search_exists(params) → Optional[str]`; MCP
-  `check_saved_search`.
-- `GET /api/v3/searchalerts/savedsearch/alerts/total-hits` → 200,
-  `{hits: <n>, savedSearchCount: <n>}` (new-match counter).
-  Code: `Wallapop.saved_search_hits() → int`; MCP `saved_search_hits`.
-- `DELETE /api/v3/searchalerts/savedsearch/{uuid}` → **200**, empty body.
-  Code: `Wallapop.remove_saved_search(search_id)`; MCP `remove_saved_search`.
-
-All verified live against a real account (full save → check → remove,
-including the `exists` 404 after deleting).
-
-### Delete an item: `DELETE /api/v3/items/{id}`
+### Borrar un artículo: `DELETE /api/v3/items/{id}`
 
 ```http
 DELETE /api/v3/items/{id}
 ```
 
-- Returns **204**. Permanent: the listing leaves the marketplace and stops
-  existing (a later GET returns 404). Unlike `PUT /items/{id}/reserve` (still
-  visible but reserved), `PUT /items/{id}/sold` (off the marketplace, kept in
-  the sales history) and `PUT /items/{id}/inactivate` (temporarily hidden).
-- Verified live (2026-09-23): publish a test item → 200, `DELETE /items/{id}`
-  → 204, `GET /items/{id}` → 404.
-- Base headers only, with the internal `item_id` (12-char hash), like the other
-  item endpoints.
-- Also documented in Wallapop's public developer API (`developers.wallapop.com`,
-  the official `deleteItem` method on `DELETE /items/{itemId}`).
-- Code: `Wallapop.delete_item(item_id)`; CLI `wallapop delete <item> [--yes]`;
-  MCP `delete_item`.
+- Devuelve **204**. Borrado permanente: elimina el anuncio del marketplace y
+  deja de existir (un GET posterior devuelve 404). Es distinto de
+  `PUT /items/{id}/reserve` (lo mantiene visible pero reservado), de
+  `PUT /items/{id}/sold` (lo quita del marketplace pero lo conserva en el
+  historial de ventas), y de `PUT /items/{id}/inactivate` (lo oculta
+  temporalmente).
+- Verificado en vivo (2026-09-23): publicar un item de prueba → 200, borrarlo
+  con `DELETE /items/{id}` → 204, y `GET /items/{id}` del mismo → 404.
+- Los headers necesarios son los base del CLI (`Authorization`, etc.), sin el
+  `Accept: application/vnd.upload-v2+json` de la edición. También hay que
+  pasar el `item_id` interno (hash de 12 chars de la dirección `#/item/...`),
+  igual que el resto de endpoints de items.
+- Documentado también en la API pública de Wallapop para desarrolladores
+  (`developers.wallapop.com`, método oficial `deleteItem` sobre el mismo
+  recurso `DELETE /items/{itemId}`).
+- Código: `Wallapop.delete_item(item_id)` (client.py), comando CLI
+  `wallapop delete <item> [--yes]` (commands.py).
 
 ---
 
-## Purchases and sales hubs (SDUI)
+## Centro de compras y ventas (SDUI)
 
-The web's **Purchases** (`/app/purchases?selectedTab=...`) and **Sales**
-(`/app/selling?selectedTab=...`) pages are *server-driven UI*: the endpoint
-returns a widget tree and the frontend renders it as is.
+Las páginas **Compras** (`/app/purchases?selectedTab=...`) y **Ventas**
+(`/app/selling?selectedTab=...`) de la web son *server-driven UI*: el endpoint
+devuelve un árbol de widgets y el frontend lo pinta tal cual.
 
 ### GET `/sdui/purchases/{ongoing|finished}`  [root, auth]
 ### GET `/sdui/selling/{ongoing|finished}`   [root, auth]
 
-- **They live at the host root** (`https://api.wallapop.com/sdui/...`),
-  **without** `/api/v3` — like the `bff` ones. With `/api/v3` in front they
-  return `404 null for uri .../api/v3/sdui/...`.
-- Need `Authorization: Bearer`. No extra query params (captured live from the
-  browser): a plain GET with the base headers.
-- Response structure (widget tree):
-  - `main.data.content[0]` → `tab_container` with both `tabs`
-    (`id: ongoing`/`finished`, `label` localized per `Accept-Language`) and
+- **Viven en la raíz del host** (`https://api.wallapop.com/sdui/...`), **sin**
+  `/api/v3` — como los `bff`. Con `/api/v3` delante devuelven
+  `404 null for uri .../api/v3/sdui/...`.
+- Requieren `Authorization: Bearer`. Sin params de query extra (capturado en
+  vivo del navegador): GET plano con las cabeceras base del CLI.
+- Estructura de la respuesta (widget tree):
+  - `main.data.content[0]` → `tab_container` con las dos `tabs`
+    (`id: ongoing`/`finished`, `label` localizado según `Accept-Language`) y
     `content` (spacer + `directory`).
-  - `directory.data.content[]` is the list: `text` nodes (year/month
-    headers), `list_item_transaction` (order cards) or `empty_state` (empty
-    tab, with title/subtitle/button).
-- Each `list_item_transaction`:
-  - `id` (order uuid); the real link is in `events.on_click.data.url`
-    (tracking `app/delivery/tracking/<uuid>` for shipped purchases, or the item
-    URL for in-person sales).
-  - `data.main.data.content` (item title),
-    `data.detail.data.content` (e.g. "Transacción completada 25 abr 2025"),
+  - `directory.data.content[]` es la lista: nodos `text` (cabeceras de
+    año/mes), `list_item_transaction` (las tarjetas de pedido) o
+    `empty_state` (pestaña vacía, con título/subtítulo/botón).
+- Cada `list_item_transaction`:
+  - `id` (uuid del pedido), aunque el enlace real va en `events.on_click.data.url`
+    (tracking `app/delivery/tracking/<uuid>` para compras con envío, o la URL
+    del item en las ventas vendidas en persona).
+  - `data.main.data.content` (título del artículo),
+    `data.detail.data.content` (p. ej. "Transacción completada 25 abr 2025"),
     `data.detail_price.data.content` ("14,88 €").
-  - `data.extra_details[]`: `list_item_transaction_plain_detail` details
-    (label/value: order date, shipping code, delivery method) and
-    `list_item_transaction_contact_detail` (avatar + `label` = the other party).
-  - `data.avatar.data.main_image_url` (product photo).
-- The library **does not render the tree**: `parse_sdui_transactions()`
-  (`models.py`) flattens only the cards (`id`, `title`, `detail`, `price`,
-  `details[]`, `url`), dropping grouping headers and `empty_state`.
-- Code: `Wallapop.purchases(tab)`, `Wallapop.selling(tab)`; CLI
-  `wallapop purchases [--finished]` / `wallapop selling [--finished]`; MCP
-  `list_purchases` / `list_sales`.
+  - `data.extra_details[]`: detalles `list_item_transaction_plain_detail`
+    (label/valor: fecha de pedido, código de envío, método de entrega) y
+    `list_item_transaction_contact_detail` (avatar + `label` = la otra parte).
+  - `data.avatar.data.main_image_url` (foto del producto).
+- La CLI **no pinta el árbol**: `parse_sdui_transactions()` (`models.py`)
+  aplana solo las tarjetas (`id`, `title`, `detail`, `price`, `details[]`,
+  `url`), descartando cabeceras de agrupación y `empty_state`.
+- Código: `Wallapop.purchases(tab)`, `Wallapop.selling(tab)` (client.py) y los
+  comandos CLI `wallapop purchases [--finished]` / `wallapop selling [--finished]`.
 
-## MCP server coverage
+## Cobertura del servidor MCP
 
-This catalogue keeps the project's original endpoint research. The tools the
-MCP server exposes (`wallapop_mcp/mcp_server.py`) are documented in
-[AGENTS.md](../AGENTS.md#mcp-tool-reference). Unofficial endpoints can change;
-the offline tests do not verify live availability.
+Este catálogo conserva la investigación del proyecto original. La superficie actual del servidor Rust y sus límites se documentan en [MCP.md](MCP.md). Los endpoints no oficiales pueden cambiar; las pruebas locales no verifican su disponibilidad en vivo.

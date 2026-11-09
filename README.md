@@ -1,335 +1,189 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/figurophobia/wallapop-mcp/main/docs/logo-dark.svg">
-    <img src="https://raw.githubusercontent.com/figurophobia/wallapop-mcp/main/docs/logo-light.svg" alt="Wallapop × Model Context Protocol" height="96">
-  </picture>
-</p>
+# Wallapop MCP
 
-<h1 align="center">wallapop-mcp</h1>
+A small Rust executable for searching and managing Wallapop through MCP or the CLI.
+Five direct dependencies, native threads, pooled HTTP and verified TLS. No interpreter,
+async runtime, browser automation framework or external process is needed at runtime.
 
-<p align="center">
-  <a href="https://github.com/figurophobia/wallapop-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/figurophobia/wallapop-mcp/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://pypi.org/project/wallapop-mcp/"><img alt="PyPI" src="https://img.shields.io/pypi/v/wallapop-mcp?color=13C1AC"></a>
-  <img alt="Python" src="https://img.shields.io/badge/python-3.10%E2%80%933.14-3776AB?logo=python&logoColor=white">
-  <img alt="MCP" src="https://img.shields.io/badge/MCP-stdio-16181D">
-  <img alt="Tools" src="https://img.shields.io/badge/tools-30-13C1AC">
-  <a href="https://github.com/figurophobia/wallapop-mcp/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
-  <a href="https://github.com/figurophobia/vinted-mcp"><img alt="Sibling: vinted-mcp" src="https://img.shields.io/badge/sibling-vinted--mcp-09B1BA"></a>
-</p>
+## Build
 
-<p align="center">
-  <b>Give an AI agent a Wallapop account.</b><br>
-  Search listings, spot deals against the market median, negotiate offers, chat with buyers and sellers,
-  keep saved-search alerts and manage your own listings — in pure Python over Wallapop's web API, no browser
-  required for the core workflows. <b>There is no checkout or payment.</b>
-</p>
-
----
-
-One codebase, three interfaces:
-
-| | What | Entry point |
-|---|---|---|
-| **MCP server** | 30 tools over stdio for any MCP client; writes hidden unless you opt in | `wallapop-mcp` |
-| ⌨ **CLI** | Search, deals, offers, chat, alerts and listing management from the terminal | `wallapop` |
-| **Python library** | Typed client the other two are built on | `import wallapop_mcp` |
-
-## Contents
-
-- [Highlights](#highlights)
-- [Install](#install)
-- [Log in](#log-in)
-- [Use it from an MCP client](#use-it-from-an-mcp-client)
-- [MCP tools](#mcp-tools)
-- [CLI](#cli)
-- [Python library](#python-library)
-- [How it works](#how-it-works)
-- [Safety and limits](#safety-and-limits)
-- [Configuration](#configuration)
-- [Troubleshooting](#troubleshooting)
-- [Development](#development)
-- [Status and legal](#status-and-legal)
-
-## Highlights
-
-| Area | What you get |
-|---|---|
-| **Search** | Keyword search with category / subcategory, condition, price, shipping, ordering and geography (city, region or country presets, or exact coordinates); autocomplete; the full category tree |
-| **Deals** | `deals` ranks listings by discount against the median of the results, can auto-offer or message the best ones; `watch` keeps scanning |
-| **Alerts** | Saved searches (deal sniping): save, check, new-hit counter, remove |
-| **Items & sellers** | Listing details, seller profile with ratings, stats, reviews and their listings |
-| **Messaging** | Inbox, conversations, message a seller or reply as the seller |
-| **Offers** | Offer limits from the web's offer editor, send offers, accept / decline / counter, an offer-status dashboard per conversation |
-| **Selling** | Publish with photos (pure API or the web wizard), edit, reserve, mark sold, pause, delete |
-| **Account** | Favorites, purchases and sales hubs |
-| **Sessions** | Email + password, a browser login window for Google accounts, Firefox import or pasted cookies; token refresh |
-
-## Install
-
-Python 3.10+.
+Rust 1.85+ and a C toolchain (for the TLS dependency).
 
 ```sh
-pip install wallapop-mcp                  # or: uvx wallapop-mcp / pipx install wallapop-mcp
-pip install 'wallapop-mcp[browser]' && playwright install chromium     # + browser login / publish wizard
+cargo build --release --locked
+./target/release/wallapop-mcp --help
 ```
 
-Prefer no Python at all? Download the standalone `wallapop-mcp` / `wallapop` executables (Linux, macOS,
-Windows; built with PyInstaller) from the [releases page](https://github.com/figurophobia/wallapop-mcp/releases).
+The executable is `target/release/wallapop-mcp` (`wallapop-mcp.exe` on Windows).
+Release builds optimize for size and strip symbols. No published binaries yet.
+The local macOS arm64 build is 1.39 MiB; see [measurements](docs/PERFORMANCE.md).
 
-## Log in
-
-The MCP server never logs in by itself; create a session once with the CLI.
-
-| Method | Command | Best for |
-|---|---|---|
-| **Auto** | `wallapop login` | Uses whatever is available: a stored session, a Firefox session, the browser window, or suggests email login |
-| Email + password | `wallapop login you@mail.com` (prompts) | Regular accounts. Google accounts have no Wallapop password. |
-| Browser window | `wallapop login --wizard [--timeout 600]` | **Google accounts** or any browser-only session |
-| Firefox import | `wallapop login --browser firefox` | Already logged in on Firefox |
-| Pasted cookies | `wallapop login --cookies-file cookies.txt` or `--cookies '…'` | Any browser or Windows (copy the `Cookie:` header from DevTools; see `cookies.txt.example`) |
-| Environment | `WALLAPOP_ACCESS_TOKEN` (+ `WALLAPOP_REFRESH_TOKEN`) | Headless agents |
-
-```sh
-wallapop session     # offline: source and token expiry
-wallapop logout      # delete the stored credentials
-```
-
-Credentials live in `~/.config/wallapop-mcp/` (override with `WALLAPOP_CONFIG_DIR`), outside any repository.
-Never paste them into prompts or issues.
-
-## Use it from an MCP client
+## MCP
 
 ```json
 {
   "mcpServers": {
     "wallapop": {
-      "command": "wallapop-mcp",
-      "args": ["--allow-writes"]
+      "command": "/absolute/path/to/wallapop-mcp",
+      "args": []
     }
   }
 }
 ```
 
-OpenCode (`~/.config/opencode/opencode.json`):
+The default command serves MCP over stdin/stdout. Diagnostics use stderr. Startup,
+discovery and `session_status` never contact Wallapop. Public reads need no account,
+subject to Wallapop's access controls.
 
-```json
-{
-  "mcp": {
-    "wallapop": { "type": "local", "command": ["wallapop-mcp", "--allow-writes"], "enabled": true }
-  }
-}
-```
+Add `--session /absolute/path/to/.config/wallapop_cli` to reuse a saved session,
+or set `WALLAPOP_ACCESS_TOKEN` and optionally `WALLAPOP_REFRESH_TOKEN`.
+`WALLAPOP_SESSION_PATH` is equivalent to `--session`; files are loaded only from
+an explicit path. Refresh supports both API tokens and web session cookies, with
+atomic private session persistence.
 
-| Flag / variable | Effect |
-|---|---|
-| `--allow-writes` | Registers the write tools. Without it the server is read-only. |
-| `--session <dir\|file>` | Session file or config directory (default `~/.config/wallapop-mcp`) |
-| `WALLAPOP_ACCESS_TOKEN` / `WALLAPOP_REFRESH_TOKEN` | Use these tokens instead of a session file |
+**Writes are hidden and disabled unless `--allow-writes` is supplied.** This grants
+capability; the agent still needs the user's intent for each consequential action.
 
-Reads (search, suggestions, item details, sellers, categories) work **without an account**. Inbox, offers,
-favorites, purchases/sales, saved searches and every write need a session.
-
-## MCP tools
-
-30 tools. Required arguments are listed; everything else is optional. Item arguments accept an internal id,
-a web slug or a full URL.
-
-#### Read (17)
-
-| Tool | Required args | What it does |
-|---|---|---|
-| `session_status` | — | Inspect local authentication status and whether writes are enabled |
-| `search` | `keywords` | Search listings with bounded pages and compact results |
-| `get_item` | `item_id` | Get the details of one listing |
-| `get_seller` | `user_id` | Get a seller profile and aggregated ratings, optionally recent reviews |
-| `list_categories` | — | Get the search category tree |
-| `list_inbox` | — | Read a bounded inbox page for the signed-in account |
-| `get_conversation` | `conversation_id` | Read a conversation and its available messages |
-| `unread_count` | — | Get the number of unread messages |
-| `list_purchases` | — | Read ongoing or finished purchases |
-| `list_sales` | — | Read ongoing or finished sales |
-| `get_offer_constraints` | `item_id` | Read offer limits for a listing |
-| `get_offer_status` | `conversation_id` | Read offer events from a conversation |
-| `seller_items` | `user_id` | List a seller's published listings (their profile grid) |
-| `suggest` | `keyword` | Autocomplete suggestions for a search keyword, as the web search box shows them |
-| `list_favorites` | — | List the listings the signed-in account has favorited |
-| `saved_search_hits` | — | Total new listings across the account's saved searches (the web's badge counter) |
-| `check_saved_search` | `keywords` | Check whether a search with exactly these filters is saved; returns its id or null |
-
-#### Write (13)
-
-| Tool | Required args | What it does |
-|---|---|---|
-| `set_favorite` | `item_id`, `favorited` | Set whether a listing is a favorite |
-| `send_message` | `message` | Message a seller (item_id), or reply as the seller in an existing conversation (conversation_id) |
-| `send_offer` | `item_id`, `amount` | Send a purchase offer |
-| `respond_offer` | `offer_id`, `action` | Accept or decline an offer |
-| `counter_offer` | `offer_id`, `amount` | Propose a new amount on an open offer |
-| `publish_item` | `title`, `description`, `price`, `category_leaf_id`, `condition`, `photo_paths` | Publish a listing |
-| `edit_item` | `item_id` | Update only supplied listing fields, preserving other attributes |
-| `reserve_item` | `item_id`, `reserved` | Set reservation state on an owned listing |
-| `mark_sold` | `item_id`, `sold` | Set sold state on an owned listing |
-| `pause_item` | `item_id` | Pause (inactivate) an owned listing: hidden from the marketplace, kept in your catalog |
-| `delete_item` | `item_id` | Permanently delete an owned listing |
-| `save_search` | `keywords` | Save a search (alert) so Wallapop notifies new matching listings |
-| `remove_saved_search` | `search_id` | Delete a saved search by id |
-Names match [vinted-mcp](https://github.com/figurophobia/vinted-mcp) wherever the concept is the same, so an
-agent can drive both marketplaces with the same vocabulary. Agent flows (buy & negotiate, sell) are described
-step by step in [AGENTS.md](https://github.com/figurophobia/wallapop-mcp/blob/main/AGENTS.md).
+| Surface | Features |
+| --- | --- |
+| 14 read tools | Session, search, deals, listing, seller, categories, own listings, inbox, thread, unread count, purchases, sales, offer limits and history |
+| 10 optional write tools | Favorites, messages and seller replies, send/respond/counter offers, publish, edit, reserve, sold, delete |
+| CLI | The same tools, ergonomic commands, JSON/CSV output, deal ranking, bounded watch with optional offers/messages and dry-run |
+| Rust library | `Client::invoke`, with the same validation, write gate and errors |
 
 ## CLI
 
-<details open>
-<summary><b>Search, deals and alerts</b></summary>
+```sh
+wallapop-mcp search 'nintendo switch' --city madrid --max-price 200 --ship-only
+wallapop-mcp show 'https://es.wallapop.com/item/example-slug'
+wallapop-mcp deals 'camera' --min-discount 0.2 --top 5
+wallapop-mcp call list_categories '{}'
+wallapop-mcp --session ./session.json login --cookies-file ./cookies.txt
+wallapop-mcp --session ./session.json --allow-writes message --conversation THREAD --text 'Hola'
+```
+
+Prices are decimal **strings** in tool JSON, such as `"19.95"`, and ordinary decimal
+arguments in CLI flags. All mutating CLI commands also require `--allow-writes`.
+See [usage](docs/USAGE.md), [tool reference](docs/MCP.md), [Rust API](docs/API.md)
+and [migration](docs/MIGRATION.md).
+
+## Design and limits
+
+- Separate modules for protocol, transport, sessions, search, response models,
+  messaging, publication and CLI. No duplicated API implementation.
+- 45-second total tool budget, four workers by default (maximum 16), one upstream
+  request start per second. Ping and cancellation remain responsive during I/O.
+- Reads retry transient failures, respect `Retry-After`, share identical cached
+  requests and reuse connections. Mutations use fresh connections and are never
+  retried after an uncertain result. A definitive 401 may refresh and retry once.
+- 64 KiB input frames, 32 KiB tool arguments, 4 MiB upstream bodies, 128 KiB tool
+  payloads, 64 cache entries and 8 MiB cache budget. No disk response cache.
+- At most five search pages, 50 listings, ten JPEGs, 8 MiB per photo and 32 MiB per
+  publication. Every photo is validated before creating the listing.
+- Edits preserve existing state. Failed publication steps retain the created item
+  ID. Uncertain offers retain their generated ID; uncertain messages identify the
+  conversation. Check state before retrying.
+- Automatic contact reuses bounded `contacted.json` history beside an explicit
+  session, or `--contacted-file PATH`, recording attempts before sending.
+
+## Docker / NAS deployment
+
+The container runs [`gateway/`](gateway), a small Python service that serves MCP over
+Streamable HTTP at `/mcp` and forwards every tool call to one long-lived `wallapop-mcp`
+stdio process. The gateway is its own OAuth 2.1 authorization server with exactly one
+owner: claude.ai (web, Desktop, mobile) registers itself, and you approve it by signing
+in with Google. Only the Google account in `MCP_OWNER_EMAIL`, with a verified email, gets
+a token. Everyone else is refused after the Google step.
+
+Public endpoint: `https://wallapop.mergoth.synology.me/mcp`
+
+```
+claude.ai → router :443 → DSM reverse proxy (TLS) → 127.0.0.1:8080 → gateway → wallapop-mcp
+```
+
+**One-time setup**
+
+1. Google Cloud Console → APIs & Services → Credentials → Create OAuth client ID →
+   *Web application*. Authorized redirect URI:
+   `https://wallapop.mergoth.synology.me/oauth/google/callback`. The OAuth consent screen
+   can stay in *Testing* with your account as the only test user.
+2. DSM → Control Panel → Login Portal → Advanced → Reverse Proxy → Create: source
+   `HTTPS wallapop.mergoth.synology.me:443`, destination `HTTP localhost:8080`. Under
+   Custom Header add *WebSocket*; under Advanced Setting set the proxy read timeout to 86400.
+   The existing `*.mergoth.synology.me` certificate covers it.
+3. Run `./scripts/configure-nas-oauth.sh`: it prompts for the values, writes `.env` on
+   the NAS and starts the container. Or write `.env` beside `docker-compose.yml` (mode 600)
+   by hand:
+
+   ```sh
+   MCP_RESOURCE_URL=https://wallapop.mergoth.synology.me/mcp
+   GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=...
+   MCP_OWNER_EMAIL=you@gmail.com
+   # Optional: static bearer for Claude Code. Leave empty for OAuth only.
+   MCP_AUTH_TOKEN=
+   ```
+
+4. `mkdir -p data state && chmod 700 state`, put `session.json` in `data/`, then
+   `docker compose up -d --build`.
+
+| Variable | Notes |
+| --- | --- |
+| `MCP_RESOURCE_URL` | The MCP URL exactly as clients enter it, `/mcp` included. claude.ai requires an exact match. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | The Google OAuth web client from step 1. |
+| `MCP_OWNER_EMAIL` | The one Google account allowed in, compared case-insensitively. |
+| `MCP_AUTH_TOKEN` | Optional static bearer. Never expires, so it is the weakest credential; leave empty when unused. |
+| `WALLAPOP_MCP_ARGS` | Extra arguments for the binary, e.g. `--allow-writes`. Writes stay off by default. |
+
+OAuth clients and token digests (never tokens themselves) live in `state/oauth-state.json`.
+Access tokens last 1 hour; refresh tokens last 90 days, rotate on every use, and a replayed
+refresh token revokes its whole chain. To sign every client out, delete that file and restart.
+
+**Security note:** keep the port bound to `127.0.0.1` and never forward 8080 on the router.
+The reverse proxy is the only way in.
+
+**Connecting** — claude.ai: Settings → Connectors → Add custom connector → URL
+`https://wallapop.mergoth.synology.me/mcp`, then *Connect* and sign in with Google. The
+connector then also works in Claude Desktop and the mobile apps. Claude Code can use the
+same OAuth flow, or the static bearer:
 
 ```sh
-wallapop search "nintendo switch" --city madrid --max-price 200 --order price_asc --min-price 1
-wallapop search "ps5" --subcat 10088 --condition as_good_as_new,good --ship-only --pages 2 --json
-wallapop suggest "nintendo sw"
-wallapop deals "nintendo 3ds" --city galicia --min-discount 0.2 --top 10
-wallapop deals "nintendo ds" --offer-pct 0.8 --msg "Hi! Would you sell it for {offer}?" --dry-run
-wallapop watch "steam deck" --max-price 300 --interval 600
-wallapop alert save "switch 2" --max-price 300 | alert check "switch 2" --max-price 300 | alert hits | alert remove --id <uuid>
+claude mcp add --transport http wallapop https://wallapop.mergoth.synology.me/mcp \
+  --header "Authorization: Bearer <MCP_AUTH_TOKEN>"
 ```
 
-Geography: `--city` takes cities, regions (`galicia`, `andalucia`, …) and countries (`italia`, `portugal`,
-`francia`, …), or use `--lat/--lon`. Orders: `relevance`, `newest`, `price_asc`, `price_desc`, `closest`.
-Conditions: `un_opened`, `in_box`, `new`, `as_good_as_new`, `good`, `fair`, `has_given_it_all`.
-</details>
+**Refreshing the session cookie** — Wallapop uses a web-only 2FA login, so
+credentials must be imported from a browser session. When the cookie expires:
 
-<details>
-<summary><b>Inspect, chat and offers</b></summary>
+1. Go to `es.wallapop.com` in Chrome (logged in), open DevTools Console, run
+   `copy(document.cookie)`
+2. Run `./scripts/refresh-nas-cookie.sh` and paste when prompted
 
-```sh
-wallapop show <item-url-or-id>
-wallapop seller <user_id> [--extra] | wallapop seller-items <user_id>
-wallapop message <item> --text "¿Sigue disponible?"
-wallapop message --conversation <id> --text "…"       # reply as the seller
-wallapop replies --conversation <id>
-wallapop offer <item> --price 30 [--msg "…"] [--dry-run]
-wallapop offer status [<conversation|item|offer_id>]   # negotiation dashboard
-wallapop offer accept|decline <offer_id> | wallapop offer counter <offer_id> --price 34
-```
-</details>
-
-<details>
-<summary><b>Sell and account</b></summary>
-
-```sh
-wallapop publish ./photos --summary "Nintendo 3DS" --price 120 --condition good --brand Nintendo --model 3DS
-wallapop publish ./photos --summary "…" --price 120 --mode browser     # the web upload wizard (Playwright)
-wallapop edit <item> --price 110 --title "…"
-wallapop reserve <item> [--remove] | wallapop sold <item> [--undo] | wallapop inactivate <item>
-wallapop delete <item> [--yes]
-wallapop favorites | wallapop favorite <item> [--remove]
-wallapop purchases [--finished] | wallapop selling [--finished]
-```
-</details>
-
-The complete guide with every flag is in [docs/USAGE.md](https://github.com/figurophobia/wallapop-mcp/blob/main/docs/USAGE.md).
-
-## Python library
-
-```python
-from wallapop_mcp import Wallapop, build_client, resolve_internal_id
-
-public = Wallapop()                                   # no account needed for reads
-for item in public.search("nintendo switch", pages=1):
-    print(item.price, item.title, item.url)
-
-client, _ = build_client()                            # signed-in client; SessionError if not logged in
-item_id = resolve_internal_id("https://es.wallapop.com/item/<slug>")
-r = client.send_offer(item_id, 30, "¿Te vale 30?")    # Response: r.ok, r.status, r.data
-```
-
-Reference: [docs/API.md](https://github.com/figurophobia/wallapop-mcp/blob/main/docs/API.md). Raw endpoint research: [docs/ENDPOINTS.md](https://github.com/figurophobia/wallapop-mcp/blob/main/docs/ENDPOINTS.md).
-
-## How it works
-
-```mermaid
-flowchart LR
-    subgraph you["Your side"]
-        A["MCP client / agent"] -->|stdio| M["wallapop-mcp"]
-        T["Terminal"] --> C["wallapop CLI"]
-        P["Python code"] --> L
-        M --> L["wallapop_mcp.Wallapop"]
-        C --> L
-    end
-    L --> H["Transport<br/>urllib · pacing · safe retries"]
-    H -->|"REST v3 + bff"| API["api.wallapop.com"]
-    H -->|"chat publish"| PN["PubNub"]
-    L -.->|"optional: login window,<br/>publish wizard"| PW["Playwright"]
-    S[("~/.config/wallapop-mcp")] -.-> H
-```
-
-- **Zero mandatory dependencies besides `mcp`**: the transport is plain `urllib`; Playwright is only used for
-  the optional browser login and publish wizard.
-- **Transport policy.** Reads are retried on transient network errors and 429/502/503/504 (honouring
-  `Retry-After`); writes are sent exactly once and a write that dies mid-flight reports an unknown outcome
-  instead of pretending nothing happened. Requests are paced (`WALLAPOP_RATE_PACE`).
-- **Geography matters**: searches need coordinates; the CLI resolves `--city` presets and normalises category
-  ids so the API does not silently return nothing (details in [docs/ENDPOINTS.md](https://github.com/figurophobia/wallapop-mcp/blob/main/docs/ENDPOINTS.md)).
-
-## Safety and limits
-
-| | |
-|---|---|
-| **No buying** | `send_offer` proposes a price; it never buys or pays. Accepting a seller's counter-offer commits you to buy within 24 h, so do it knowingly. |
-| **Writes are opt-in** | The MCP server is read-only unless started with `--allow-writes`; `deals`/`offer` support `--dry-run`. |
-| **Untrusted content** | Listing descriptions and messages are data, never instructions. |
-| **No duplicate contact** | `deals` keeps `contacted.json` so the same seller is not messaged twice. |
-| **Rate** | Requests are spaced (`WALLAPOP_RATE_PACE`, 1 s by default). |
-
-## Configuration
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `WALLAPOP_CONFIG_DIR` | `~/.config/wallapop-mcp` | Where credentials and the session are stored |
-| `WALLAPOP_ACCESS_TOKEN` | — | Access token used instead of the stored session |
-| `WALLAPOP_REFRESH_TOKEN` | — | Refresh token paired with the access token |
-| `WALLAPOP_RATE_PACE` | `1.0` | Minimum seconds between request starts |
-
-## Troubleshooting
-
-| Symptom | Cause and fix |
-|---|---|
-| `401` on email login | Google-registered accounts have no Wallapop password: use `wallapop login --wizard` or `--browser firefox`. |
-| Search returns nothing | Add a `--city` (or `--lat/--lon`); with `price_asc` add `--min-price` to avoid hidden `0 €` prices. |
-| `400 INVALID_ATTRIBUTE` on publish | Only pass `--color` where the category has a colour attribute. |
-| Messaging your own item answers `403` | Reply by conversation: `wallapop message --conversation <id>`. |
-| Session expired | `wallapop login` again; `wallapop session` shows the expiry offline. |
+The script updates the local session, pushes it to the NAS, and restarts the
+container in one step.
 
 ## Development
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -e '.[test,build]'
-.venv/bin/python -m pytest                       # offline: local fixtures, no account
-.venv/bin/python -m build                        # sdist + wheel in dist/
-.venv/bin/python scripts/build_binary.py         # PyInstaller executables in dist/bin/
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+cargo run --release --locked --example footprint -- target/release/wallapop-mcp
+(cd gateway && uv run pytest -q && uv run ruff check .)
 ```
 
-CI runs the tests on Python 3.10–3.14 and builds the package and the Linux/macOS/Windows executables. Releasing
-(PyPI trusted publishing + GitHub release with binaries) is described in [CONTRIBUTING.md](https://github.com/figurophobia/wallapop-mcp/blob/main/CONTRIBUTING.md).
+Tests use synthetic fixtures, local HTTP servers and the real executable's stdio.
+They never contact Wallapop or read a developer's session. See
+[architecture](docs/ARCHITECTURE.md), [performance](docs/PERFORMANCE.md) and
+[contributing](CONTRIBUTING.md).
 
-```text
-wallapop_mcp/
-├── client.py        API client (search, items, offers, chat, publish, edit, …)
-├── http.py          transport: pacing, safe retries, decoding
-├── session.py       build_client / session status
-├── weblogin.py      browser login window (optional)
-├── publish.py       web publish wizard (optional)
-├── models.py        Item, offers, deals
-├── mcp_server.py    the MCP tools
-└── cli/             the wallapop CLI
-```
+Experimental and unofficial: offline tests establish known API contracts, not
+current live account compatibility. No checkout or payments. The binary has no HTTP
+server of its own; the optional `gateway/` adds one for remote use.
+The former browser-only helpers are replaced by session/cookie import; see the
+migration guide for compatibility details.
 
-## Status and legal
-
-Experimental, unofficial integration. The endpoints are derived from the web application and can change or
-reject non-browser clients. Offline tests cover protocol behaviour and known response shapes; they do not
-establish current live compatibility. Writes may have partial or unknown outcomes.
-
-MIT license. Wallapop and its trademarks belong to their respective owners; this project is not affiliated
-with Wallapop. The Wallapop and Model Context Protocol logos are trademarks of their respective owners and of the MCP project; they are shown only to identify the service and protocol this project works with. See
-[CREDITS.md](https://github.com/figurophobia/wallapop-mcp/blob/main/CREDITS.md).
+MIT. Based on the endpoint research and behavior of
+[figurophobia/wallapop-cli](https://github.com/figurophobia/wallapop-cli), with the
+seller reply improvement reviewed in
+[hugoocoto's python-only-mcp branch](https://github.com/hugoocoto/wallapop-cli/tree/python-only-mcp).
+Original history and [credits](CREDITS.md) are preserved.
