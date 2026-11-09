@@ -17,6 +17,10 @@ REMOTE_DIR="~/wallapop-mcp"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+echo "==> Running tests before deploy..."
+cargo test --quiet
+echo "==> Tests passed."
+
 echo "==> Sending source to NAS..."
 tar -C "${REPO_ROOT}" -czf - \
     Cargo.toml Cargo.lock \
