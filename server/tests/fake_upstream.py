@@ -13,5 +13,11 @@ def echo(text: str) -> str:
     return f"echo:{text}:{os.environ.get('WALLAPOP_SESSION_PATH', '-')}"
 
 
+@server.tool()
+def get_env(name: str) -> str:
+    """Return an environment variable, or <missing> if unset."""
+    return os.environ.get(name, "<missing>")
+
+
 if __name__ == "__main__":
     server.run()

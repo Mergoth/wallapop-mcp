@@ -322,6 +322,24 @@ wheels = [
 ]
 
 [[package]]
+name = "mcp-gateway"
+version = "0.1.0"
+source = { path = "vendor/mcp_gateway-0.1.0-py3-none-any.whl" }
+dependencies = [
+    { name = "mcp" },
+    { name = "uvicorn" },
+]
+wheels = [
+    { filename = "mcp_gateway-0.1.0-py3-none-any.whl", hash = "sha256:d365db5d98800e209af1d70dc200c4b794bb40f7a7d1685d18fb55f2ad8ae2f8" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcp", specifier = "==2.0.0" },
+    { name = "uvicorn" },
+]
+
+[[package]]
 name = "mcp-types"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -781,12 +799,11 @@ wheels = [
 ]
 
 [[package]]
-name = "wallapop-gateway"
+name = "wallapop-server"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "mcp" },
-    { name = "uvicorn" },
+    { name = "mcp-gateway" },
 ]
 
 [package.dev-dependencies]
@@ -796,10 +813,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "mcp", specifier = "==2.0.0" },
-    { name = "uvicorn" },
-]
+requires-dist = [{ name = "mcp-gateway", path = "vendor/mcp_gateway-0.1.0-py3-none-any.whl" }]
 
 [package.metadata.requires-dev]
 dev = [

@@ -3,6 +3,6 @@ target
 data
 state
 .env
-gateway/.venv
-gateway/tests
+server/.venv
+server/tests
 **/__pycache__

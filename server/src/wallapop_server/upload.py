@@ -1,5 +1,6 @@
 """PUT /upload/{ticket_id} — receives a photo binary and stores it for Rust to consume."""
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -13,6 +14,8 @@ from starlette.responses import JSONResponse
 logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MiB
+GC_INTERVAL = 600  # seconds between GC sweeps
+GC_MAX_AGE = 3600  # files older than 1 h are eligible
 
 
 def _check_magic(data: bytes) -> bool:
@@ -20,9 +23,7 @@ def _check_magic(data: bytes) -> bool:
         return True
     if data[:4] == b"\x89PNG":
         return True
-    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return True
-    return False
+    return bool(len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP")
 
 
 def _verify_sig(ticket_id: str, exp_str: str, sig: str, secret: bytes) -> bool:
@@ -82,3 +83,30 @@ async def handle_upload(request: Request) -> JSONResponse:
     bin_path.write_bytes(body)
     logger.info("upload ticket %s stored (%d bytes)", ticket_id, len(body))
     return JSONResponse({"ref": f"upload:{ticket_id}", "bytes": len(body)}, status_code=201)
+
+
+async def _gc_once(upload_dir: Path, *, max_age: float = GC_MAX_AGE) -> None:
+    if not upload_dir.exists():
+        return
+    cutoff = time.time() - max_age
+    for path in upload_dir.iterdir():
+        if path.suffix in {".meta", ".bin", ".consumed"}:
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+async def _gc_loop(
+    upload_dir: Path,
+    *,
+    interval: float = GC_INTERVAL,
+    max_age: float = GC_MAX_AGE,
+) -> None:
+    while True:
+        try:
+            await _gc_once(upload_dir, max_age=max_age)
+        except Exception:
+            logger.exception("upload GC error")
+        await asyncio.sleep(interval)

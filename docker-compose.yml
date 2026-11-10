@@ -1,37 +1,33 @@
 services:
   wallapop-mcp:
+    container_name: wallapop-mcp
     build:
       context: .
       args:
         UID: ${APP_UID:-1026}
         GID: ${APP_GID:-100}
     image: wallapop-mcp:latest
-    ports:
-      # Loopback only: the DSM reverse proxy is the only thing that should reach it.
-      - "127.0.0.1:8080:8080"
+    networks:
+      - mcp-net
     environment:
-      - MCP_RESOURCE_URL=${MCP_RESOURCE_URL:?Set MCP_RESOURCE_URL to the public MCP URL, /mcp included}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:?Set GOOGLE_CLIENT_SECRET}
-      - MCP_OWNER_EMAIL=${MCP_OWNER_EMAIL:?Set MCP_OWNER_EMAIL to the one Google account allowed in}
-      # Optional static bearer for header-capable clients (Claude Code). Empty = OAuth only.
-      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
-      # Enable write tools (publish, edit, offer, etc.). Safe: the gateway controls access.
+      - GATEWAY_REGISTRATION_TOKEN=${GATEWAY_REGISTRATION_TOKEN:?Set GATEWAY_REGISTRATION_TOKEN}
+      - WALLAPOP_UPSTREAM_TOKEN=${WALLAPOP_UPSTREAM_TOKEN:?Set WALLAPOP_UPSTREAM_TOKEN}
+      - GATEWAY_INTERNAL_URL=${GATEWAY_INTERNAL_URL:-http://mcp-gateway:8081}
       - WALLAPOP_MCP_ARGS=--allow-writes
-      # Photo upload tickets (optional). Set all three to enable create_upload_ticket.
-      - UPLOAD_SECRET=${UPLOAD_SECRET:-}
+      - UPLOAD_SECRET=${UPLOAD_SECRET:?Set UPLOAD_SECRET (signs photo upload tickets)}
       - UPLOAD_DIR=${UPLOAD_DIR:-/data/uploads}
-      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-https://mcp.mergoth.synology.me/wallapop}
       - UPLOAD_TTL_SECONDS=${UPLOAD_TTL_SECONDS:-600}
-      # Extra allowlisted hosts for https:// photo URLs (comma-separated, optional).
       - PHOTO_URL_HOSTS=${PHOTO_URL_HOSTS:-}
     volumes:
       - ./data:/data
-      # OAuth clients and token digests.
-      - ./state:/state
     read_only: true
     tmpfs:
       - /tmp:size=16m
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
+
+networks:
+  mcp-net:
+    external: true
