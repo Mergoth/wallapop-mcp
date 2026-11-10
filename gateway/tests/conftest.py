@@ -147,7 +147,7 @@ def login_txn(c: TestClient, client_id: str, challenge: str) -> str:
 def to_google(c: TestClient, google: FakeGoogle, txn: str) -> dict[str, str]:
     """Open the consent page and click Continue; returns the Google authorize query."""
     assert c.get("/login", params={"txn": txn}).status_code == 200
-    r = c.post("/login", data={"txn": txn})
+    r = c.get("/login", params={"txn": txn, "go": "1"})
     assert r.status_code == 302, r.text
     location = urlparse(r.headers["location"])
     assert f"{location.scheme}://{location.netloc}{location.path}" == (

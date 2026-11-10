@@ -26,6 +26,12 @@ pub struct Config {
     pub session: Option<PathBuf>,
     pub allow_writes: bool,
     pub interval: Option<Duration>,
+    // Photo ingestion
+    pub upload_dir: Option<PathBuf>,
+    pub public_base_url: Option<String>,
+    pub upload_secret: Vec<u8>,
+    pub upload_ttl_seconds: Option<u64>,
+    pub photo_url_hosts: Vec<String>,
 }
 struct Session {
     access: String,
@@ -41,6 +47,11 @@ pub struct Client {
     transport: Transport,
     session: Mutex<Session>,
     refreshing: Mutex<()>,
+    pub(crate) upload_dir: Option<PathBuf>,
+    pub(crate) public_base_url: Option<String>,
+    pub(crate) upload_secret: Vec<u8>,
+    pub(crate) upload_ttl_seconds: u64,
+    pub(crate) photo_url_hosts: Vec<String>,
 }
 struct Call {
     method: &'static str,
@@ -61,6 +72,11 @@ impl Client {
             transport: Transport::new(c.interval.unwrap_or(Duration::from_secs(1))),
             session: Mutex::new(session),
             refreshing: Mutex::new(()),
+            upload_dir: c.upload_dir,
+            public_base_url: c.public_base_url,
+            upload_secret: c.upload_secret,
+            upload_ttl_seconds: c.upload_ttl_seconds.unwrap_or(600),
+            photo_url_hosts: c.photo_url_hosts,
         })
     }
 

@@ -8,6 +8,7 @@ from starlette.testclient import TestClient
 
 from conftest import (
     BASE,
+    CALLBACK,
     GOOGLE_ID,
     MCP_HEADERS,
     OWNER,
@@ -90,16 +91,89 @@ def test_consent_page_escapes_the_client_name_and_shows_the_redirect_host(
     assert "claude.ai" in page
 
 
-def test_consent_click_without_the_page_cookie_is_refused(client: TestClient) -> None:
-    """A cross-site form post carries no SameSite=Strict cookie, so it cannot skip consent."""
+def test_consent_continues_with_a_link_not_a_form(client: TestClient) -> None:
+    """CSP form-action would govern every redirect after a form submit, out to the client's
+    own redirectors; a link navigation is not subject to it."""
     _, challenge = pkce()
     txn = login_txn(client, register(client), challenge)
-    r = client.post("/login", data={"txn": txn})
-    assert r.status_code == 403
+    page = client.get("/login", params={"txn": txn}).text
+    assert "<form" not in page
+    assert f'href="/login?txn={txn}&amp;go=1"' in page
+
+
+def test_consent_page_trusts_gemini_redirects(client: TestClient) -> None:
+    gemini = "https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-1-example"
+    client_id = register(client, name="Gemini", redirect=gemini)
+    _, challenge = pkce()
+    r = client.get(
+        "/authorize",
+        params={
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": gemini,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "state": "s",
+        },
+    )
+    assert r.status_code == 302, r.text
+    page = client.get(r.headers["location"].removeprefix(BASE))
+    assert "not a known AI assistant" not in page.text
+
+
+def _confidential(client: TestClient, method: str) -> tuple[str, str]:
+    r = client.post(
+        "/register",
+        json={
+            "client_name": "Gemini",
+            "redirect_uris": [CALLBACK],
+            "token_endpoint_auth_method": method,
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["client_id"], r.json()["client_secret"]
+
+
+def _bad_code_exchange(client: TestClient, form: dict, auth: tuple[str, str] | None = None):
+    data = {"grant_type": "authorization_code", "code": "nope", "redirect_uri": CALLBACK,
+            "code_verifier": "v" * 43, **form}
+    return client.post("/token", data=data, auth=auth)
+
+
+@pytest.mark.parametrize("registered", ["client_secret_post", "client_secret_basic"])
+@pytest.mark.parametrize("sent", ["post", "basic"])
+def test_token_accepts_the_secret_in_form_or_basic(
+    client: TestClient, registered: str, sent: str
+) -> None:
+    """A bad code past a passing client check is invalid_grant (400), not invalid_client (401)."""
+    client_id, secret = _confidential(client, registered)
+    if sent == "post":
+        r = _bad_code_exchange(client, {"client_id": client_id, "client_secret": secret})
+    else:
+        r = _bad_code_exchange(client, {}, auth=(client_id, secret))
+    assert r.status_code == 400, r.text
+    assert r.json()["error"] == "invalid_grant"
+
+
+def test_token_still_rejects_a_wrong_secret(client: TestClient) -> None:
+    client_id, _ = _confidential(client, "client_secret_post")
+    r = _bad_code_exchange(client, {}, auth=(client_id, "wrong"))
+    assert r.status_code == 401
+
+
+def test_consent_click_without_the_page_cookie_is_refused(client: TestClient) -> None:
+    """A cross-site link carries no SameSite=Strict cookie, so it cannot skip consent."""
+    _, challenge = pkce()
+    txn = login_txn(client, register(client), challenge)
+    go = {"txn": txn, "go": "1"}
+    assert client.get("/login", params=go).status_code == 403
+    assert client.post("/login", data={"txn": txn}).status_code == 403
     client.get("/login", params={"txn": txn})
     client.cookies.clear()
     client.cookies.set("wallapop_login", "another-txn")
-    assert client.post("/login", data={"txn": txn}).status_code == 403
+    assert client.get("/login", params=go).status_code == 403
 
 
 @pytest.mark.parametrize(

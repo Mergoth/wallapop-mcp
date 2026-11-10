@@ -115,6 +115,7 @@ impl Server {
             refresh_token: refresh.into(),
             session,
             interval: Some(Duration::ZERO),
+            ..Config::default()
         })
         .unwrap()
     }

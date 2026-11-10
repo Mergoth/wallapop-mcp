@@ -120,7 +120,7 @@ fn cli_keeps_option_values_literal_and_supports_global_options_after_command() {
             .as_array()
             .unwrap()
             .len(),
-        24
+        31
     );
     let o = command()
         .args(["message", "--text", "Hola", "--dry-run", "--", "--help"])

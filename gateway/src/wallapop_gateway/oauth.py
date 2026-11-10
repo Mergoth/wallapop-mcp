@@ -64,7 +64,7 @@ _SECURITY_HEADERS = {
     "Cache-Control": "no-store",
     "Content-Security-Policy": (
         "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; "
-        "form-action 'self' https://accounts.google.com"
+        "form-action 'none'"
     ),
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
@@ -136,6 +136,8 @@ class GoogleOwnerOAuthProvider(
         # Short-lived, in memory only: a restart just means signing in again.
         self._pending: dict[str, _PendingLogin] = {}
         self._codes: dict[str, AuthorizationCode] = {}
+        # Recently completed txns, so a reloaded or resubmitted sign-in page says "done", not "expired".
+        self._completed_logins: dict[str, dict] = {}
 
         # Durable: registered clients and token digests.
         self._clients: dict[str, OAuthClientInformationFull] = {}
@@ -243,13 +245,25 @@ class GoogleOwnerOAuthProvider(
 
         pending = self._live_pending(txn)
         if pending is None:
+            # Check if this txn was recently completed — ChatGPT re-POSTs to verify after callback.
+            now2 = time.time()
+            self._completed_logins = {t: e for t, e in self._completed_logins.items() if e["expires_at"] > now2}
+            if isinstance(txn, str) and txn in self._completed_logins:
+                log.info("login %s for completed txn — 200", request.method)
+                return _page("Sign-in complete. Return to your AI assistant.")
+            if request.method == "POST" and form is not None:
+                log.warning(
+                    "POST /login with no valid txn — form keys: %s; body preview: %.200s",
+                    list(form.keys()),
+                    str(dict(form))[:200],
+                )
             return _page("This sign-in link has expired. Start the connection again from your AI assistant.", status=400)
         client = self._clients.get(pending.client_id)
         if client is None:
             return _page("Unknown client. Start the connection again from your AI assistant.", status=400)
         assert isinstance(txn, str)
 
-        if form is None:
+        if form is None and request.query_params.get("go") != "1":
             response = _consent_page(txn, client, pending.params)
             # The Google session is ambient, so the click must come from this page: a
             # cross-site POST would not carry a SameSite=Strict cookie.
@@ -329,13 +343,12 @@ class GoogleOwnerOAuthProvider(
             subject=OWNER,
         )
         log.warning("owner signed in; client=%s", client.client_name or client.client_id)
-        response = RedirectResponse(
-            construct_redirect_uri(
-                str(pending.params.redirect_uri), code=auth_code, state=pending.params.state
-            ),
-            status_code=302,
-            headers={"Cache-Control": "no-store"},
+        redirect_url = construct_redirect_uri(
+            str(pending.params.redirect_uri), code=auth_code, state=pending.params.state
         )
+        log.warning("callback redirect to %s", str(pending.params.redirect_uri))
+        self._completed_logins[txn] = {"expires_at": now + 120}
+        response = RedirectResponse(redirect_url, status_code=302, headers={"Cache-Control": "no-store"})
         response.delete_cookie(TXN_COOKIE, path=LOGIN_PATH)
         return response
 
@@ -379,6 +392,14 @@ class GoogleOwnerOAuthProvider(
         self, client: OAuthClientInformationFull, authorization_code: str
     ) -> AuthorizationCode | None:
         code = self._codes.get(authorization_code)
+        if code is None:
+            log.warning("load_authorization_code: code not found (pool size=%d)", len(self._codes))
+        elif code.client_id != client.client_id:
+            log.warning(
+                "load_authorization_code: client_id mismatch — code has %s, request has %s",
+                code.client_id,
+                client.client_id,
+            )
         return code if code is not None and code.client_id == client.client_id else None
 
     async def exchange_authorization_code(
@@ -510,7 +531,7 @@ body{font:16px/1.5 system-ui,-apple-system,sans-serif;max-width:26rem;margin:10v
 main{background:#fff;border:1px solid #d0d7de;border-radius:12px;padding:1.5rem}
 h1{font-size:1.25rem;margin:0 0 .75rem}p{margin:.5rem 0}
 .meta{color:#57606a;font-size:.9rem}.warn{color:#9a6700}
-button{width:100%;font:inherit;font-weight:600;padding:.6rem;margin-top:.75rem;border:0;border-radius:8px;background:#1f883d;color:#fff}
+.button{display:block;box-sizing:border-box;text-align:center;text-decoration:none;width:100%;font:inherit;font-weight:600;padding:.6rem;margin-top:.75rem;border:0;border-radius:8px;background:#1f883d;color:#fff}
 """
 
 _TRUSTED_REDIRECT_HOSTS = (
@@ -519,7 +540,9 @@ _TRUSTED_REDIRECT_HOSTS = (
     "chatgpt.com",
     "chat.openai.com",
     "openai.com",
-    "localhost",
+    "oauth-redirect.googleusercontent.com",  # Gemini app custom connectors
+    "vertexaisearch.cloud.google.com",  # Gemini Enterprise
+    "localhost",  # Gemini CLI, Claude Code
     "127.0.0.1",
 )
 
@@ -551,7 +574,9 @@ def _consent_page(
         f"<h1>Allow access to your Wallapop account?</h1>"
         f"<p><b>{name}</b> is asking to use your Wallapop account.</p>"
         f"<p class=meta>Returns to <b>{html.escape(host)}</b></p>{warning}"
-        f'<form method=post action="{LOGIN_PATH}">'
-        f'<input type=hidden name=txn value="{html.escape(txn)}">'
-        f"<button type=submit>Continue with Google</button></form>"
+        # A link, not a form: browsers check CSP form-action against every redirect after a
+        # form submit, and the chain ends on the client's own redirectors (e.g. Gemini's
+        # googleusercontent page 302s onward), which no allowlist here can name.
+        f'<a class=button href="{LOGIN_PATH}?{html.escape(urlencode({"txn": txn, "go": "1"}))}">'
+        f"Continue with Google</a>"
     )
