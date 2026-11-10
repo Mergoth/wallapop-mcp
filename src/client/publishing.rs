@@ -1,38 +1,14 @@
 use super::{Call, Client, models::attribute, read_file};
 use crate::{Context, Error, Result, first, identifier, money, text, uuid};
-use crate::transport::MAX_BODY;
+use crate::photos::{self, PhotoConfig};
 use serde_json::{Value, json};
-use std::path::Path;
-
-fn fetch_photo(path: &str) -> crate::Result<Vec<u8>> {
-    if path.starts_with("http://") || path.starts_with("https://") {
-        use std::io::Read as _;
-        let mut resp = ureq::get(path)
-            .call()
-            .map_err(|_| Error::new("photo_fetch_failed"))?;
-        if resp.status() != 200 {
-            return Err(Error::new("photo_fetch_failed"));
-        }
-        let mut buf = Vec::new();
-        resp.body_mut()
-            .as_reader()
-            .take(MAX_BODY as u64 + 1)
-            .read_to_end(&mut buf)
-            .map_err(|_| Error::new("photo_fetch_failed"))?;
-        if buf.len() > MAX_BODY {
-            return Err(Error::new("photo_too_large"));
-        }
-        Ok(buf)
-    } else {
-        read_file(Path::new(path), 8 << 20)
-    }
-}
+use std::path::{Path, PathBuf};
 
 impl Client {
     pub(super) fn publish(&self, ctx: &Context, a: &Value) -> Result<Value> {
-        for key in ["title", "description", "color"] {
+        for key in ["title", "description"] {
             if a[key].as_str().unwrap_or("").trim().is_empty() {
-                return Err(Error::new("listing_field_required"));
+                return Err(Error::new("listing_field_required").field(key));
             }
         }
         numeric_category(&a["category_leaf_id"])?;
@@ -41,23 +17,40 @@ impl Client {
         if shipping && a.get("max_weight_kg").is_none() {
             return Err(Error::new("shipping_weight_required"));
         }
-        // Validate every photo before creating the listing, including byte limits.
-        let mut photos = Vec::new();
-        let mut total = 0;
-        for path in a["photo_paths"]
-            .as_array()
-            .ok_or(Error::new("photos_required"))?
-        {
-            let b = fetch_photo(path.as_str().unwrap_or(""))?;
-            if !b.starts_with(&[255, 216, 255]) || b.len() < 4 {
-                return Err(Error::new("jpeg_required"));
-            }
-            total += b.len();
-            if total > 32 << 20 {
-                return Err(Error::new("photos_exceed_32_mib"));
-            }
-            photos.push(b);
+
+        // Exactly one of photo_paths / photo_files must be non-empty.
+        let paths = a["photo_paths"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+        let files = a["photo_files"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+        if paths.is_empty() && files.is_empty() {
+            return Err(Error::new("photos_required"));
         }
+        if !paths.is_empty() && !files.is_empty() {
+            return Err(Error::new("supply_either_photo_paths_or_photo_files_not_both"));
+        }
+
+        // Validate ALL photos before creating the listing.
+        let (resolved, ticket_ids) = if !paths.is_empty() {
+            let mut resolved = Vec::new();
+            for path in paths {
+                let p = path.as_str().unwrap_or("");
+                if p.starts_with("http://") || p.starts_with("https://") {
+                    return Err(Error::new("photo_paths_does_not_accept_urls_use_photo_files"));
+                }
+                let raw = read_file(Path::new(p), photos::MAX_PHOTO_BYTES)?;
+                resolved.push(photos::Photo { bytes: photos::normalize(&raw)? });
+            }
+            (resolved, vec![])
+        } else {
+            let dir = self
+                .upload_dir
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("/data/uploads"));
+            let cfg = PhotoConfig {
+                upload_dir: dir,
+                extra_hosts: self.photo_url_hosts.clone(),
+            };
+            photos::resolve(files, &cfg)?
+        };
         let me = self.get(ctx, "/users/me", true, true)?;
         let lat = &me["location"]["approximated_latitude"];
         let lon = &me["location"]["approximated_longitude"];
@@ -88,9 +81,14 @@ impl Client {
             delivery["max_weight_kg"] = a["max_weight_kg"].clone();
             delivery["cost_configuration_id"] = cost.into();
         }
-        let mut attributes = crate::pick(a, &["title", "description", "condition", "color"]);
-        attributes["brand"] = a.get("brand").cloned().unwrap_or(json!(""));
-        attributes["model"] = a.get("model").cloned().unwrap_or(json!(""));
+        let mut attributes = crate::pick(a, &["title", "description", "condition"]);
+        for key in &["color", "brand", "model"] {
+            if let Some(v) = a.get(*key) {
+                if v.as_str().is_some_and(|s| !s.trim().is_empty()) {
+                    attributes[key] = v.clone();
+                }
+            }
+        }
         attributes["price_amount"] = price;
         attributes["suggested_data_banner"] = Value::Null;
         let body = json!({
@@ -101,7 +99,7 @@ impl Client {
                 "approximated": me["location"]["approximated_location"] == true
             }
         });
-        let (bytes, content_type) = multipart(&photos[0], "item", &body.to_string())?;
+        let (bytes, content_type) = multipart(&resolved[0].bytes, "item", &body.to_string())?;
         let v = self.upload(ctx, "/items", bytes, content_type)?;
         let id = text(&v["id"]);
         if identifier(&id).is_err() {
@@ -111,8 +109,8 @@ impl Client {
             "item_id": id, "completed_photos": 1, "failed_photos": [],
             "failed_photos_count": 0, "partial": false, "unknown_outcome": false
         });
-        for (i, photo) in photos.iter().enumerate().skip(1) {
-            let result = multipart(photo, "order", &(i + 1).to_string())
+        for (i, photo) in resolved.iter().enumerate().skip(1) {
+            let result = multipart(&photo.bytes, "order", &(i + 1).to_string())
                 .and_then(|(b, ct)| self.upload(ctx, &format!("/items/{id}/picture2"), b, ct));
             if let Err(e) = result {
                 out["failed_photos"]
@@ -124,7 +122,7 @@ impl Client {
                 }
                 out["partial"] = true.into();
                 if matches!(e.code, "timeout" | "cancelled") {
-                    for j in i + 1..photos.len() {
+                    for j in i + 1..resolved.len() {
                         out["failed_photos"]
                             .as_array_mut()
                             .unwrap()
@@ -139,6 +137,10 @@ impl Client {
             }
         }
         out["failed_photos_count"] = out["failed_photos"].as_array().unwrap().len().into();
+        // Mark upload tickets consumed after a successful publish.
+        if let Some(ref dir) = self.upload_dir {
+            photos::consume_tickets(&ticket_ids, dir);
+        }
         Ok(out)
     }
 
@@ -199,24 +201,22 @@ fn multipart(photo: &[u8], field: &str, value: &str) -> Result<(Vec<u8>, String)
 
 pub(super) fn edit_body(v: &Value, a: &Value) -> Result<Value> {
     let mut attributes = json!({});
-    for key in [
-        "brand",
-        "model",
-        "color",
-        "title",
-        "description",
-        "condition",
-    ] {
+    for key in ["title", "description", "condition"] {
         let value = a.get(key).cloned().unwrap_or_else(|| attribute(v, key));
         if !value.is_string() {
             return Err(Error::new("current_attribute_unavailable"));
         }
-        if matches!(key, "title" | "description" | "color")
-            && value.as_str().unwrap().trim().is_empty()
-        {
-            return Err(Error::new("listing_field_required"));
+        if matches!(key, "title" | "description") && value.as_str().unwrap().trim().is_empty() {
+            return Err(Error::new("listing_field_required").field(key));
         }
         attributes[key] = value;
+    }
+    // color, brand, model: include only when non-empty (categories may lack these attributes).
+    for key in ["color", "brand", "model"] {
+        let value = a.get(key).cloned().unwrap_or_else(|| attribute(v, key));
+        if value.as_str().is_some_and(|s| !s.trim().is_empty()) {
+            attributes[key] = value;
+        }
     }
     let price = a.get("price").cloned().unwrap_or_else(|| {
         let p = v

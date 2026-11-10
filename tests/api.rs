@@ -690,7 +690,6 @@ fn edit_rejects_missing_state_before_writing() {
         "shipping",
         "location",
         "title",
-        "brand",
         "condition",
         "price",
         "category_leaf_id",
@@ -714,9 +713,20 @@ fn edit_rejects_missing_state_before_writing() {
         assert_eq!(s.count(), 1);
     }
 }
+fn small_jpeg() -> Vec<u8> {
+    use image::RgbImage;
+    use image::codecs::jpeg::JpegEncoder;
+    let img = RgbImage::new(2, 2);
+    let mut out = Vec::new();
+    JpegEncoder::new_with_quality(&mut out, 50)
+        .encode(img.as_raw(), 2, 2, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    out
+}
+
 fn publish_args(dir: &Temp, count: usize) -> Value {
     let paths = (0..count)
-        .map(|i| dir.file(&format!("photo{i}.jpg"), [255, 216, 255, 1]))
+        .map(|i| dir.file(&format!("photo{i}.jpg"), small_jpeg()))
         .collect::<Vec<_>>();
     json!({"title":"Camera","description":"Description","price":"19.95","category_leaf_id":"10088","condition":"good","color":"blue","shipping_allowed":false,"photo_paths":paths})
 }
@@ -730,6 +740,35 @@ fn publish_validates_all_photos_before_network() {
     a["photo_paths"] = json!([dir.0]);
     assert!(s.client(true).invoke(&ctx(), "publish_item", &a).is_err());
     assert_eq!(s.count(), 0);
+}
+#[test]
+fn publish_color_is_optional_and_field_named_in_errors() {
+    let dir = Temp::new();
+    // color absent: publish must reach Wallapop, not error server-side.
+    let s = Server::new(|r| match r.path() {
+        "/api/v3/users/me" => Reply::json(
+            200,
+            json!({"location":{"approximated_latitude":40,"approximated_longitude":-3}}),
+        ),
+        "/api/v3/items" => Reply::json(201, json!({"id":ITEM})),
+        _ => Reply::raw(200, ""),
+    });
+    let mut a = publish_args(&dir, 1);
+    a.as_object_mut().unwrap().remove("color");
+    assert!(
+        s.client(true).invoke(&ctx(), "publish_item", &a).is_ok(),
+        "publish_item without color must succeed"
+    );
+    // listing_field_required must name the offending field.
+    let s2 = Server::new(|_| panic!("should not reach upstream"));
+    let mut b = publish_args(&dir, 1);
+    b["title"] = json!("   "); // passes minLength:1 but trim() is empty
+    let err = s2
+        .client(true)
+        .invoke(&ctx(), "publish_item", &b)
+        .unwrap_err();
+    assert_eq!(err.code, "listing_field_required");
+    assert_eq!(err.detail.as_ref().and_then(|d| d["field"].as_str()), Some("title"));
 }
 #[test]
 fn publish_multipart_extra_photos_partial_id_and_exact_cents() {
@@ -866,4 +905,97 @@ fn publish_missing_created_id_is_unknown_and_does_not_upload_extras() {
     assert!(e.unknown);
     assert_eq!(e.code, "missing_created_item_id");
     assert_eq!(s.count(), 2);
+}
+
+/// Full publish contract: covers every optional-field combination that must NOT be blocked
+/// server-side, and verifies the exact multipart body sent to Wallapop.
+/// This test acts as a regression gate: if any server-side guard breaks an optional field,
+/// it will be caught here before deploy.
+#[test]
+fn publish_contract_optional_fields_and_body_shape() {
+    let me_reply = || {
+        Reply::json(
+            200,
+            json!({"location":{"approximated_latitude":40,"approximated_longitude":-3}}),
+        )
+    };
+
+    // 1. No color — categories like "dolls" (10082) have no color attribute.
+    {
+        let dir = Temp::new();
+        let s = Server::new(move |r| match r.path() {
+            "/api/v3/users/me" => me_reply(),
+            "/api/v3/items" => {
+                let b = String::from_utf8_lossy(&r.body);
+                // color must NOT appear in the multipart body
+                assert!(!b.contains("\"color\""), "color must be absent when not supplied");
+                // brand/model must NOT appear either
+                assert!(!b.contains("\"brand\""));
+                assert!(!b.contains("\"model\""));
+                Reply::json(201, json!({"id": ITEM}))
+            }
+            _ => Reply::raw(200, ""),
+        });
+        let mut a = publish_args(&dir, 1);
+        a.as_object_mut().unwrap().remove("color");
+        s.client(true)
+            .invoke(&ctx(), "publish_item", &a)
+            .expect("publish without color must succeed");
+    }
+
+    // 2. With color — must appear in the body.
+    {
+        let dir = Temp::new();
+        let s = Server::new(move |r| match r.path() {
+            "/api/v3/users/me" => me_reply(),
+            "/api/v3/items" => {
+                let b = String::from_utf8_lossy(&r.body);
+                assert!(b.contains("\"color\":\"blue\""), "color must be sent when supplied");
+                Reply::json(201, json!({"id": ITEM}))
+            }
+            _ => Reply::raw(200, ""),
+        });
+        s.client(true)
+            .invoke(&ctx(), "publish_item", &publish_args(&dir, 1))
+            .expect("publish with color must succeed");
+    }
+
+    // 3. With brand and model — must appear in the body.
+    {
+        let dir = Temp::new();
+        let s = Server::new(move |r| match r.path() {
+            "/api/v3/users/me" => me_reply(),
+            "/api/v3/items" => {
+                let b = String::from_utf8_lossy(&r.body);
+                assert!(b.contains("\"brand\":\"Acme\""));
+                assert!(b.contains("\"model\":\"X1\""));
+                Reply::json(201, json!({"id": ITEM}))
+            }
+            _ => Reply::raw(200, ""),
+        });
+        let mut a = publish_args(&dir, 1);
+        a["brand"] = json!("Acme");
+        a["model"] = json!("X1");
+        s.client(true)
+            .invoke(&ctx(), "publish_item", &a)
+            .expect("publish with brand+model must succeed");
+    }
+
+    // 4. listing_field_required carries field name.
+    {
+        let dir = Temp::new();
+        let s = Server::new(|_| panic!("must not reach upstream"));
+        let mut a = publish_args(&dir, 1);
+        a["title"] = json!("   "); // whitespace only — passes minLength:1 but trim() empty
+        let e = s
+            .client(true)
+            .invoke(&ctx(), "publish_item", &a)
+            .unwrap_err();
+        assert_eq!(e.code, "listing_field_required");
+        assert_eq!(
+            e.detail.as_ref().and_then(|d| d["field"].as_str()),
+            Some("title"),
+            "listing_field_required must name the offending field"
+        );
+    }
 }

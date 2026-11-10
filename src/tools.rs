@@ -33,13 +33,26 @@ fn item() -> Value {
 fn listing() -> Value {
     json!({
         "title": string(50), "description": string(640), "price": price(),
-        "category_leaf_id": string(20),
+        "category_leaf_id": {
+            "type": "string", "minLength": 1, "maxLength": 20,
+            "description": "Take from a comparable listing: get_item(id).category."
+        },
         "condition": enumeration(&[
             "un_opened", "in_box", "new", "as_good_as_new", "good", "fair", "has_given_it_all"
         ]),
-        "brand": {"type": "string", "maxLength": 100},
-        "model": {"type": "string", "maxLength": 100},
-        "color": string(50), "max_weight_kg": integer(1,30),
+        "brand": {
+            "type": "string", "maxLength": 100,
+            "description": "Optional. Many categories reject it with INVALID_ATTRIBUTE (e.g. 10082 dolls). On INVALID_ATTRIBUTE retry without brand; put it in title instead."
+        },
+        "model": {
+            "type": "string", "maxLength": 100,
+            "description": "Optional. Many categories reject it with INVALID_ATTRIBUTE. On INVALID_ATTRIBUTE retry without it."
+        },
+        "color": {
+            "type": "string", "minLength": 1, "maxLength": 50,
+            "description": "Optional. Many categories reject it with INVALID_ATTRIBUTE. On INVALID_ATTRIBUTE retry without it."
+        },
+        "max_weight_kg": integer(1,30),
         "shipping_allowed": boolean(), "cost_configuration_id": string(128)
     })
 }
@@ -241,10 +254,23 @@ fn build_definitions() -> Vec<Tool> {
         &["offer_id", "amount"],
     );
     let mut p = listing();
-    p["photo_paths"] = json!({"type":"array","minItems":1,"maxItems":10,"items":string(4096)});
+    p["photo_paths"] = json!({"type":"array","minItems":0,"maxItems":10,"items":string(4096),
+        "description":"Server-local file paths only (no URLs). Use photo_files for URLs or ChatGPT uploads."});
+    p["photo_files"] = json!({
+        "type": "array", "minItems": 1, "maxItems": 10,
+        "description": "Photos from URLs, data: URIs, upload: ticket refs, or OpenAI file objects. Exactly one of photo_paths / photo_files must be supplied.",
+        "items": {
+            "oneOf": [
+                {"type": "string", "minLength": 1, "maxLength": 65536},
+                {"type": "object",
+                 "properties": {"download_url": {"type": "string", "minLength": 1, "maxLength": 65536}},
+                 "required": ["download_url"]}
+            ]
+        }
+    });
     add(
         "publish_item",
-        "Publish with 1–10 JPEG photos (local paths or http/https URLs). Partial results retain the created item ID; never recreate a partial listing.",
+        "Publish with 1–10 photos. Supply photo_paths (server-local JPEG/PNG/WebP files) OR photo_files (https:// URLs from allowlisted hosts, data: URIs, upload: refs, or OpenAI {download_url} objects). Partial results retain the created item ID; never recreate a partial listing. Errors: outcome_unknown:false = nothing created, safe to retry with the same photo_files refs. upload_ticket_not_found = ticket expired or lost; create a new ticket, re-upload, then retry. Call get_item(item_id) for the public listing URL.",
         true,
         p,
         &[
@@ -253,10 +279,15 @@ fn build_definitions() -> Vec<Tool> {
             "price",
             "category_leaf_id",
             "condition",
-            "photo_paths",
-            "color",
             "shipping_allowed",
         ],
+    );
+    add(
+        "create_upload_ticket",
+        "Create 1–10 one-time upload tickets. Per photo: PUT raw bytes to upload_url, Content-Type: image/jpeg → 201 {ref, bytes}. Pass the returned ref values in publish_item.photo_files. Single-use, short TTL. Requires UPLOAD_SECRET and PUBLIC_BASE_URL to be configured.",
+        true,
+        json!({"count": integer(1, 10)}),
+        &["count"],
     );
     let mut p = listing();
     p["item_id"] = string(2048);
@@ -321,20 +352,24 @@ impl Tool {
             && !matches!(
                 self.name,
                 "set_favorite" | "send_message" | "send_offer" | "publish_item"
-                    | "pause_item" | "save_search"
+                    | "pause_item" | "save_search" | "create_upload_ticket"
             );
         let idempotent = matches!(
             self.name,
             "set_favorite" | "edit_item" | "reserve_item" | "mark_sold"
                 | "delete_item" | "pause_item" | "remove_saved_search"
         );
-        json!({
+        let mut v = json!({
             "name": self.name, "description": self.description, "inputSchema": self.schema,
             "annotations": {
                 "readOnlyHint": !self.write, "destructiveHint": destructive,
                 "idempotentHint": idempotent, "openWorldHint": self.name != "session_status"
             }
-        })
+        });
+        if self.name == "publish_item" {
+            v["_meta"] = json!({"openai/fileParams": ["photo_files"]});
+        }
+        v
     }
     pub fn validate(&self, args: &Value) -> Result<()> {
         if args.to_string().len() > 32768 || !valid(&self.schema, args) {
@@ -356,13 +391,22 @@ impl Tool {
 // Only the small schema vocabulary emitted above is supported. Discovery and
 // execution use the same definitions, including nested array and price checks.
 fn valid(schema: &Value, v: &Value) -> bool {
+    if let Some(one_of) = schema.get("oneOf").and_then(|v| v.as_array()) {
+        return one_of.iter().filter(|s| valid(s, v)).count() == 1;
+    }
     let typed = match schema["type"].as_str().unwrap_or("") {
         "object" => v.as_object().is_some_and(|m| {
             schema["required"]
                 .as_array()
                 .is_none_or(|a| a.iter().all(|k| m.contains_key(k.as_str().unwrap_or(""))))
                 && m.iter()
-                    .all(|(k, v)| schema["properties"].get(k).is_some_and(|s| valid(s, v)))
+                    .all(|(k, v)| {
+                        if let Some(s) = schema["properties"].get(k) {
+                            valid(s, v)
+                        } else {
+                            schema["additionalProperties"] != json!(false)
+                        }
+                    })
         }),
         "array" => v.as_array().is_some_and(|a| {
             bounds(schema, a.len() as f64, "minItems", "maxItems")

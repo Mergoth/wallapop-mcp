@@ -76,7 +76,7 @@ fn lifecycle_discovery_negotiation_annotations_and_write_gate() {
         );
         assert_eq!(r[0]["result"]["protocolVersion"], "2025-06-18");
         let tools = r[1]["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), if writes { 24 } else { 14 });
+        assert_eq!(tools.len(), if writes { 31 } else { 17 });
         assert_eq!(
             tools
                 .iter()
@@ -226,7 +226,7 @@ fn executable_stdio_handshake_discovery_call_and_clean_stdout() {
         .map(|s| serde_json::from_str::<Value>(s).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(r.len(), 3);
-    assert_eq!(r[1]["result"]["tools"].as_array().unwrap().len(), 14);
+    assert_eq!(r[1]["result"]["tools"].as_array().unwrap().len(), 17);
     assert_eq!(r[2]["result"]["structuredContent"]["logged_in"], false);
 }
 #[test]

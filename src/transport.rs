@@ -1,4 +1,5 @@
 use crate::{Context, Error, Result};
+use serde_json::{Value, json};
 use std::{
     collections::{HashMap, VecDeque},
     io::Read,
@@ -205,9 +206,11 @@ impl Transport {
                         ctx.sleep(delay.max(Duration::from_millis(200 << attempt)))?;
                         continue;
                     }
+                    let detail = upstream_detail(&body);
                     return Err(Error {
                         status: Some(status),
                         unknown: !r.read && status >= 500,
+                        detail,
                         ..Error::new("http_error")
                     });
                 }
@@ -266,6 +269,55 @@ pub fn encode(s: &str) -> String {
         })
         .collect()
 }
+/// Extract safe diagnostic fields from an upstream error body (no tokens, ≤2 KB trimmed).
+pub fn upstream_detail(body: &[u8]) -> Option<Value> {
+    if body.is_empty() || body.len() > 8192 {
+        return None;
+    }
+    let v: Value = serde_json::from_slice(body).ok()?;
+    let mut out = json!({});
+    // Top-level string fields that are safe to surface.
+    for key in &["code", "message", "error", "error_code", "error_description"] {
+        if let Some(Value::String(s)) = v.get(*key) {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() && trimmed.len() <= 512 {
+                out[key] = Value::String(trimmed.to_owned());
+            }
+        }
+    }
+    // `errors` array — include up to 5 items, each trimmed to safe string fields.
+    if let Some(Value::Array(arr)) = v.get("errors") {
+        let items: Vec<Value> = arr
+            .iter()
+            .take(5)
+            .filter_map(|item| {
+                let mut e = json!({});
+                for k in &["code", "field", "message"] {
+                    if let Some(Value::String(s)) = item.get(*k) {
+                        let t = s.trim();
+                        if !t.is_empty() && t.len() <= 256 {
+                            e[k] = Value::String(t.to_owned());
+                        }
+                    }
+                }
+                if e.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+                    Some(e)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !items.is_empty() {
+            out["errors"] = Value::Array(items);
+        }
+    }
+    if out.as_object().map(|o| o.is_empty()).unwrap_or(true) {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 pub fn query(path: &str, params: &[(String, String)]) -> String {
     if params.is_empty() {
         return path.to_string();
