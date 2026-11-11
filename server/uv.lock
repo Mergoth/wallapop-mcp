@@ -330,7 +330,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { filename = "mcp_gateway-0.1.0-py3-none-any.whl", hash = "sha256:d365db5d98800e209af1d70dc200c4b794bb40f7a7d1685d18fb55f2ad8ae2f8" },
+    { filename = "mcp_gateway-0.1.0-py3-none-any.whl", hash = "sha256:9eddec81259af1b2720a70529db18914da936191baf9be935aea4e2a80f8dcb4" },
 ]
 
 [package.metadata]
